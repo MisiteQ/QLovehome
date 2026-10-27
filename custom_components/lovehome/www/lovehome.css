@@ -2332,7 +2332,7 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .bulk-dev-toggle:hover { color: var(--fg, #1a202c); }
 .bulk-dev-ents { display: flex; flex-direction: column; padding: 4px 8px; gap: 2px; max-height: 240px; overflow-y: auto; }
 .lh-ent-picker { position: relative; }
-.lh-ent-dropdown { position: fixed; background: var(--bg1, #fff); border: 1px solid var(--bd2, #e3e6eb); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 200000; overflow: hidden; }
+.lh-ent-dropdown { position: fixed; background: #fff !important; border: 1px solid var(--bd2, #e3e6eb); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 200000; overflow: hidden; color: #1a202c; }
 
 /* 选中实体后的存在性提示条 */
 .lh-ent-status {

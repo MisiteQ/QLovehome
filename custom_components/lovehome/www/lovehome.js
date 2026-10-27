@@ -1783,9 +1783,84 @@
   };
   function roomName(id) { const r = LH.rooms.find((x) => x.id === id); return r ? r.name : ''; }
 
+  /* ── 把一台设备的所有兄弟实体自动拼成 ctl 配置 ──
+     批量导入进来的马桶/净化器等复合设备没有预配置 ctl，
+     这里根据 d.entities[] 数组遍历生成控件组，效果和模板里的马桶完全一样 */
+  function autoBuildComposite(d) {
+    const eids = (d.entities || []).filter((e) => e && e !== d.entity);  // 去掉主实体（主实体已在 d.entity）
+    if (!eids.length) return null;
+
+    const groups = [];
+    const g1 = { t: '开关 · 模式', items: [] };
+    const g2 = { t: '滑块 · 数值', items: [] };
+    const g3 = { t: '按钮 · 操作', items: [] };
+    const g4 = { t: '状态 · 读数', items: [] };
+
+    eids.forEach((eid) => {
+      const s = st(eid);
+      if (!s) return;
+      const dom = eid.split('.')[0];
+      const fname = (s.attributes && s.attributes.friendly_name) || eid.split('.')[1] || eid;
+      const label = fname.length > 14 ? fname.slice(0, 13) + '…' : fname;
+
+      switch (dom) {
+        case 'switch': case 'light':
+          g1.items.push({ k: 'sw', label, e: eid }); break;
+        case 'select':
+          g1.items.push({ k: 'seg', label, e: eid }); break;
+        case 'number': {
+          const at = s.attributes || {};
+          const step = Number(at.step) || 1;
+          const unit = at.unit_of_measurement || '';
+          g2.items.push({ k: 'num', label, e: eid, step, unit }); break;
+        }
+        case 'cover':
+          g1.items.push({ k: 'sw', label, e: eid }); break;
+        case 'fan': case 'media_player':
+          g1.items.push({ k: 'sw', label, e: eid }); break;
+        case 'water_heater': case 'humidifier':
+          g2.items.push({ k: 'num', label, e: eid, unit: '°' }); break;
+        case 'lock': case 'vacuum':
+          g1.items.push({ k: 'sw', label, e: eid }); break;
+        case 'button':
+          g3.items.push({ k: 'btn', label, e: eid, text: fname.slice(-2) }); break;
+        case 'sensor': case 'binary_sensor': {
+          const at = s.attributes || {};
+          const unit = at.unit_of_measurement || '';
+          g4.items.push({ k: 'ro', label, e: eid, unit }); break;
+        }
+        default:
+          g4.items.push({ k: 'ro', label, e: eid });
+      }
+    });
+
+    if (g1.items.length) groups.push(g1);
+    if (g2.items.length) groups.push(g2);
+    if (g3.items.length) groups.push(g3);
+    if (g4.items.length) groups.push(g4);
+    if (!groups.length) return null;
+
+    // echo 行：取主实体 + 第一个 select/switch 的状态做副标
+    const echo = [];
+    const mainSt = st(d.entity);
+    if (mainSt && mainSt.state) echo.push({ e: d.entity });
+    const modeSelect = eids.find((e) => e.startsWith('select.'));
+    if (modeSelect) echo.push({ e: modeSelect });
+
+    return { always: true, sub: g1.items.length + ' 可开关 · ' + g4.items.length + ' 读数', open: '设置', echo, groups };
+  }
+
   function openControl(d) {
     const dom = d.entity.split('.')[0];
     if (d.kind === 'cam' || dom === 'camera') { openCamera(d.entity, d.name); return; }
+
+    // ★ 如果这台设备有多个兄弟实体，自动构建 ctl 走复合面板渲染
+    //    （让批量导入的马桶能像模板马桶一样显示所有功能）
+    if (!d.ctl && d.entities && d.entities.length > 1) {
+      d.ctl = autoBuildComposite(d);
+      if (d.ctl) { openComposite(d); return; }
+    }
+
     if (d.ctl) { openComposite(d); return; }
     const act = !!ACT_DOM[dom];
     state.ctl = d.id;
