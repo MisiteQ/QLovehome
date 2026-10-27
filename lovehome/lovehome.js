@@ -1940,6 +1940,130 @@
       }
       return { always: true, sub: hasPower ? '通断 · 计量' : '通断', open: '设置', echo: [{ e: d.entity }], groups };
     },
+    /* ── 门锁（米家 / 凯迪仕 / 鹿客 / Aqara 等） ── */
+    '门锁|lock|smart_lock|door_lock|cadiz|kaadas|aqara.*lock|roci': (d, eids) => ({
+      always: true, sub: '门锁 · 电量 · 告警', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '门锁控制', items: [
+          { k: 'btn', label: '解锁', e: d.entity, svc: 'unlock', text: '🔓 解锁', dom: 'lock' },
+          { k: 'btn', label: '上锁', e: d.entity, svc: 'lock', text: '🔒 上锁', dom: 'lock' },
+          { k: 'btn', label: '开门', e: d.entity, svc: 'open', text: '🚪 开门', dom: 'lock' },
+        ] },
+        { t: '门锁状态', items: [
+          { k: 'ro', label: '电池电量', e: eids.find((e) => /battery/i.test(e)) || d.entity, unit: '%', attr: 'battery_level' },
+          { k: 'ro', label: '门状态', e: eids.find((e) => /door|contact|open/i.test(e) && e.startsWith('binary_sensor')) || '', unit: '' },
+          { k: 'ro', label: '上一次开锁', e: eids.find((e) => /last|trigg/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+        { t: '告警', items: [
+          { k: 'ro', label: '被撬告警', e: eids.find((e) => /pry|tamper/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '逗留告警', e: eids.find((e) => /lingering|stuck/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 扫地机 / 扫拖一体 / 吸尘器 ── */
+    '扫地|vacuum|robot.*vac|roborock|dreame|ilife|xiaomi.*vac|sweeper|扫拖': (d, eids) => ({
+      always: true, sub: '清扫 · 回充 · 状态', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '清扫控制', items: [
+          { k: 'sw', label: '开始清扫', e: d.entity },
+          { k: 'btn', label: '回充', e: d.entity, svc: 'return_to_base', text: '🔋 回充', dom: 'vacuum' },
+          { k: 'btn', label: '定位', e: d.entity, svc: 'locate', text: '📍 定位', dom: 'vacuum' },
+          { k: 'btn', label: '暂停', e: d.entity, svc: 'pause', text: '⏸ 暂停', dom: 'vacuum' },
+        ] },
+        { t: '清扫模式', items: [
+          { k: 'seg', label: '吸力', e: d.entity, domain: 'vacuum', opts_attr: 'fan_speed_list', field: 'fan_speed' },
+        ].filter((x) => x.e) },
+        { t: '状态', items: [
+          { k: 'ro', label: '电量', e: d.entity, unit: '%', attr: 'battery_level' },
+          { k: 'ro', label: '运行状态', e: d.entity, unit: '', attr: 'status' },
+          { k: 'ro', label: '集尘袋', e: eids.find((e) => /dust|bag|bin/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '水箱', e: eids.find((e) => /water|tank/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 加湿器 ── */
+    '加湿|humidifier|dehumidifier|除湿': (d, eids) => ({
+      always: true, sub: '湿度 · 模式 · 水位', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '加湿器', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'num', label: '目标湿度', e: d.entity, unit: '%', aval: 'humidity', min: 30, max: 70, svc: 'humidifier.set_humidity' },
+        ] },
+        { t: '模式', items: [
+          { k: 'seg', label: '运行模式', e: d.entity, domain: 'humidifier', opts_attr: 'available_modes', field: 'mode' },
+        ] },
+        { t: '状态', items: [
+          { k: 'ro', label: '当前湿度', e: d.entity, unit: '%', attr: 'current_humidity' },
+          { k: 'ro', label: '水温', e: eids.find((e) => /temp/i.test(e)) || '', unit: '°C' },
+          { k: 'ro', label: '水位/缺水上水', e: eids.find((e) => /water|level|tank/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '滤芯寿命', e: eids.find((e) => /filter/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 净化器 ── */
+    '净化|purifier|air.*purif|mi.*air': (d, eids) => ({
+      always: true, sub: '模式 · 风速 · 空气质量', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '净化器', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'seg', label: '模式', e: d.entity, domain: 'fan', opts_attr: 'preset_modes' },
+          { k: 'seg', label: '风速', e: d.entity, domain: 'fan', opts_attr: 'speed_list' },
+        ] },
+        { t: '空气质量', items: [
+          { k: 'ro', label: 'PM2.5', e: eids.find((e) => /pm25|pm2_5/i.test(e)) || '', unit: ' μg/m³' },
+          { k: 'ro', label: '甲醛', e: eids.find((e) => /formaldehyde|hcho/i.test(e)) || '', unit: ' mg/m³' },
+          { k: 'ro', label: 'TVOC', e: eids.find((e) => /tvoc/i.test(e)) || '', unit: ' mg/m³' },
+          { k: 'ro', label: 'CO₂', e: eids.find((e) => /co2/i.test(e)) || '', unit: ' ppm' },
+          { k: 'ro', label: '当前温湿度', e: eids.find((e) => /temp_humidity|temp.*humidity/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+        { t: '滤芯', items: [
+          { k: 'ro', label: 'HEPA 寿命', e: eids.find((e) => /hepa|filter/i.test(e)) || '', unit: '%' },
+          { k: 'ro', label: '活性炭寿命', e: eids.find((e) => /carbon/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 窗帘 / 幕布 / 遮阳 ── */
+    '窗帘|幕布|遮阳|cover|curtain|blind|shade': (d, eids) => ({
+      always: true, sub: '开合 · 位置', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '窗帘', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'num', label: '开合位置', e: d.entity, unit: '%', aval: 'current_position', min: 0, max: 100, svc: 'cover.set_cover_position' },
+        ] },
+      ]
+    }),
+    /* ── 音箱 / 电视 / 功放（media_player） ── */
+    '音箱|音响|speaker|soundbox|soundbar|sound_bar|电视|television|tv|media_player': (d, eids) => ({
+      always: true, sub: '播放 · 音量 · 音源', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '播放', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'btn', label: '播放/暂停', e: d.entity, svc: 'media_player.toggle', text: '▶ 播放/暂停', dom: 'media_player' },
+          { k: 'btn', label: '上一首', e: d.entity, svc: 'media_player.media_previous', text: '⏮ 上一首', dom: 'media_player' },
+          { k: 'btn', label: '下一首', e: d.entity, svc: 'media_player.media_next', text: '⏭ 下一首', dom: 'media_player' },
+        ] },
+        { t: '音量', items: [
+          { k: 'num', label: '音量', e: d.entity, unit: '%', aval: 'volume_level', min: 0, max: 1, svc: 'media_player.volume_set', mult: 100 },
+        ] },
+        { t: '音源', items: [
+          { k: 'seg', label: '输入源', e: d.entity, domain: 'media_player', opts_attr: 'source_list', field: 'source' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 摄像头（基础面板，video 在主界面显示） ── */
+    '摄像头|camera|监控|webcam|doorbell|门铃': (d, eids) => ({
+      always: true, sub: '画质 · 告警', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '摄像头', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+        ] },
+        { t: '状态', items: [
+          { k: 'ro', label: '移动侦测', e: eids.find((e) => /motion/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '有人停留', e: eids.find((e) => /person/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '夜间模式', e: eids.find((e) => /night/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
   };
   function matchDeviceTemplate(d, eids) {
     if (!d || !d.name) return null;
