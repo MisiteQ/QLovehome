@@ -1803,12 +1803,171 @@
   };
   function roomName(id) { const r = LH.rooms.find((x) => x.id === id); return r ? r.name : ''; }
 
+  /* ── 底部大按钮 power button 适用的 domain ── */
+  const MAIN_SWITCHABLE = ['switch', 'light', 'cover', 'fan', 'media_player', 'water_heater', 'humidifier', 'lock', 'vacuum', 'valve', 'remote'];
+
+  /* ── 设备模板库：按设备名关键字匹配，生成预配置 ctl ── */
+  const DEVICE_TEMPLATES = {
+    '浴霸|bathroom_heater': (d, eids) => ({
+      always: true, sub: '暖风 · 模式 · 延时', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '暖风', items: [
+          { k: 'sw', label: '暖风高挡', e: eids.find((e) => /high/i.test(e)) || '' },
+          { k: 'sw', label: '暖风低挡', e: eids.find((e) => /low/i.test(e)) || '' },
+        ].filter((x) => x.e) },
+        { t: '模式选择', items: [
+          { k: 'seg', label: '预设模式', e: eids.find((e) => /mode|preset/i.test(e)) || d.entity },
+        ].filter((x) => x.e) },
+        { t: '照明', items: [
+          { k: 'sw', label: '浴霸灯泡', e: eids.find((e) => /light|bulb/i.test(e)) || '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    '洗衣机|wash|laundry': (d, eids) => ({
+      always: true, sub: '电源 · 程序', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '电源', items: [
+          { k: 'sw', label: '通断', e: eids.find((e) => e.startsWith('switch')) || d.entity },
+        ] },
+        { t: '程序控制', items: [
+          { k: 'btn', label: '开始', e: eids.find((e) => /start/i.test(e)) || '', text: '开始' },
+          { k: 'btn', label: '暂停', e: eids.find((e) => /pause/i.test(e)) || '', text: '暂停' },
+        ].filter((x) => x.e) },
+        { t: '状态', items: [
+          { k: 'ro', label: '剩余时间', e: eids.find((e) => /remaining|time_left/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '运行状态', e: eids.find((e) => /status|state/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    '空气炸|airfry|air_fryer': (d, eids) => ({
+      always: true, sub: '温度 · 时间 · 烹饪', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '烹饪控制', items: [
+          { k: 'btn', label: '开始烹饪', e: eids.find((e) => /start/i.test(e)) || '', text: '开始' },
+          { k: 'btn', label: '暂停', e: eids.find((e) => /pause/i.test(e)) || '', text: '暂停' },
+          { k: 'btn', label: '停止烹饪', e: eids.find((e) => /stop/i.test(e)) || '', text: '停止' },
+        ].filter((x) => x.e) },
+        { t: '参数', items: [
+          { k: 'num', label: '烹饪温度', e: eids.find((e) => /temp/i.test(e)) || '', unit: '°C' },
+          { k: 'num', label: '烹饪时间', e: eids.find((e) => /time|duration/i.test(e)) || '', unit: ' 分钟' },
+        ].filter((x) => x.e) },
+        { t: '状态', items: [
+          { k: 'ro', label: '工作状态', e: eids.find((e) => /status/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '剩余时间', e: eids.find((e) => /remaining/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    '饮水机|净饮|water_dispenser|purifier': (d, eids) => ({
+      always: true, sub: '出水 · 水质 · 滤芯', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '出水', items: [
+          { k: 'ro', label: '出水温度', e: eids.find((e) => /temp/i.test(e)) || '', unit: '°C' },
+          { k: 'ro', label: '当前水温', e: eids.find((e) => /current/i.test(e)) || '', unit: '°C' },
+          { k: 'ro', label: '工作状态', e: eids.find((e) => /status/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+        { t: '水质', items: [
+          { k: 'ro', label: '进水 TDS', e: eids.find((e) => /tds_in|tds_inlet/i.test(e)) || '', unit: ' ppm' },
+          { k: 'ro', label: '出水 TDS', e: eids.find((e) => /tds_out|tds_pure/i.test(e)) || '', unit: ' ppm' },
+        ].filter((x) => x.e) },
+        { t: '滤芯 · 维护', items: [
+          { k: 'ro', label: '剩余寿命', e: eids.find((e) => /filter|cartridge/i.test(e)) || '', unit: '%' },
+          { k: 'sw', label: 'UV 杀菌', e: eids.find((e) => /uv/i.test(e)) || '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    '中控|central|smart_panel|hub': (d, eids) => ({
+      always: true, sub: '屏幕 · 音箱', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '屏幕', items: [
+          { k: 'sw', label: '亮屏', e: eids.find((e) => /screen|display/i.test(e)) || '' },
+          { k: 'num', label: '亮度', e: eids.find((e) => /brightness/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+        { t: '音箱', items: [
+          { k: 'num', label: '音量', e: eids.find((e) => /volume/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+        { t: '继电器通道', items: eids.filter((e) => /relay|switch_\d|channel/i.test(e) && e.startsWith('switch')).map((e) => ({ k: 'sw', label: e.split('.')[1].replace(/_/g, ' '), e })) },
+      ].filter((g) => g.items.length)
+    }),
+    '热水器|water_heater': (d, eids) => ({
+      always: true, sub: '温度 · 燃气', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '热水器', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'num', label: '目标水温', e: d.entity, aval: 'temperature', unit: '°C' },
+          { k: 'ro', label: '当前状态', e: eids.find((e) => /status/i.test(e)) || d.entity, unit: '' },
+        ] },
+      ]
+    }),
+    '马桶|toilet|bidet': (d, eids) => ({
+      always: true, sub: '冲洗 · 座圈 · 滤芯', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '运行', items: [
+          { k: 'sw', label: '总开关', e: d.entity },
+          { k: 'seg', label: '工作模式', e: eids.find((e) => /mode/i.test(e)) || d.entity },
+        ] },
+        { t: '冲洗', items: [
+          { k: 'num', label: '冲洗强度', e: eids.find((e) => /strength|wash/i.test(e)) || '', unit: ' 档' },
+        ].filter((x) => x.e) },
+        { t: '座圈 · 除臭', items: [
+          { k: 'sw', label: '座圈加热', e: eids.find((e) => /heat|seat/i.test(e)) || '' },
+          { k: 'sw', label: '除臭', e: eids.find((e) => /deodor/i.test(e)) || '' },
+        ].filter((x) => x.e) },
+        { t: '夜灯', items: [
+          { k: 'sw', label: '夜灯', e: eids.find((e) => /night|light/i.test(e)) || '' },
+        ].filter((x) => x.e) },
+        { t: '滤芯', items: [
+          { k: 'ro', label: '剩余寿命', e: eids.find((e) => /filter/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    '插排|插座|plug|outlet|power_strip': (d, eids) => {
+      const hasPower = eids.some((e) => /power|energy|kwh|current|voltage/i.test(e));
+      const groups = [
+        { t: '开关', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+        ] },
+      ];
+      if (hasPower) {
+        groups.push({ t: '计量', items: [
+          { k: 'ro', label: '实时功率', e: eids.find((e) => /power(_?!=)|power$/i.test(e)) || '', unit: ' W' },
+          { k: 'ro', label: '累计电量', e: eids.find((e) => /kwh|energy_total|energy|total_energy/i.test(e)) || '', unit: ' kWh' },
+          { k: 'ro', label: '电压', e: eids.find((e) => /voltage/i.test(e)) || '', unit: ' V' },
+          { k: 'ro', label: '电流', e: eids.find((e) => /current|ampere/i.test(e)) || '', unit: ' A' },
+        ].filter((x) => x.e) });
+        groups.push({ t: '状态 · 温度', items: [
+          { k: 'ro', label: '插排温度', e: eids.find((e) => /temp/i.test(e)) || '', unit: '°C' },
+        ].filter((x) => x.e) });
+      }
+      return { always: true, sub: hasPower ? '通断 · 计量' : '通断', open: '设置', echo: [{ e: d.entity }], groups };
+    },
+  };
+  function matchDeviceTemplate(d, eids) {
+    if (!d || !d.name) return null;
+    for (const [pattern, fn] of Object.entries(DEVICE_TEMPLATES)) {
+      const re = new RegExp(pattern, 'i');
+      if (re.test(d.name)) { try { return fn(d, eids); } catch (e) { /* 退回通用 */ } }
+    }
+    return null;
+  }
+
   /* ── 把一台设备的所有兄弟实体自动拼成 ctl 配置 ──
      批量导入进来的马桶/净化器等复合设备没有预配置 ctl，
      这里根据 d.entities[] 数组遍历生成控件组，效果和模板里的马桶尽量一致 */
   function autoBuildComposite(d) {
     const eids = (d.entities || []).filter((e) => e && e !== d.entity);  // 去掉主实体（主实体已在 d.entity）
     if (!eids.length) return null;
+    const dom = d.entity.split('.')[0];
+
+    // ★ 1. 先试 DEVICE_TEMPLATES 模板匹配（设备名关键字）
+    const templated = matchDeviceTemplate(d, eids);
+    if (templated && templated.groups && templated.groups.length) {
+      templated.groups.forEach((g) => { g.items = g.items.filter((it) => it.e); });
+      templated.groups = templated.groups.filter((g) => g.items.length);
+      if (templated.groups.length) {
+        if (MAIN_SWITCHABLE.includes(dom)) templated._powerEid = d.entity;
+        return templated;
+      }
+    }
 
     const groups = [];
     // 更细的分组：主开关/模式 seg/温度滑块/按钮/读数
@@ -1896,6 +2055,8 @@
       open: '设置',
       echo, groups
     };
+    // ★ 2. 通用生成的也加底部大按钮标记
+    if (MAIN_SWITCHABLE.includes(dom)) ctl._powerEid = d.entity;
     return ctl;
   }
 
@@ -1987,7 +2148,29 @@
 
   function compositeCtl(d) {
     const box = el('div', 'ctl ctl-comp');
-    box.innerHTML = ctlHead(d) + (d.ctl.groups || []).map((g) => cgroup(g)).join('');
+    let html = ctlHead(d) + (d.ctl.groups || []).map((g) => cgroup(g)).join('');
+    // ★ 底部大 power button（如果 ctl 标记了 _powerEid）
+    if (d.ctl._powerEid) {
+      const s = st(d.ctl._powerEid);
+      const on = !!s && ['on', 'open', 'unlocked', 'active'].includes(s.state);
+      html += `<div class="ctl-foot"><button class="wide" id="ctlPower" type="button" data-e="${d.ctl._powerEid}">${on ? '关闭' : '开启'} · ${d.name}</button></div>`;
+    }
+    box.innerHTML = html;
+    // 绑定 power button 点击
+    const pb = box.querySelector('#ctlPower');
+    if (pb) {
+      pb.addEventListener('click', () => {
+        const s = st(d.ctl._powerEid);
+        const on = !!s && ['on', 'open', 'unlocked', 'active'].includes(s.state);
+        const dom = d.ctl._powerEid.split('.')[0];
+        const svcMap = { switch: 'turn_on', light: 'turn_on', cover: 'open_cover', lock: 'unlock', fan: 'turn_on', media_player: 'turn_on', water_heater: 'turn_on', humidifier: 'turn_on' };
+        const svc = svcMap[dom] || 'turn_on';
+        const offSvcMap = { switch: 'turn_off', light: 'turn_off', cover: 'close_cover', lock: 'lock', fan: 'turn_off', media_player: 'turn_off', water_heater: 'turn_off', humidifier: 'turn_off' };
+        const offSvc = offSvcMap[dom] || 'turn_off';
+        sendControl(dom, on ? offSvc : svc, { entity_id: d.ctl._powerEid },
+          (on ? '关闭' : '开启') + ' · ' + d.name);
+      });
+    }
     return box;
   }
 
