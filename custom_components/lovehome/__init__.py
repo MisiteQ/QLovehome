@@ -52,20 +52,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     websocket_api.async_register_command(hass, ws_get_config)
     websocket_api.async_register_command(hass, ws_save_config)
 
-    # 4) 注册侧边栏面板
-    await panel_custom.async_register_panel(
-        hass,
-        frontend_url_path="lovehome",
-        webcomponent_name="lovehome-panel",
-        title="LoveHome",
-        icon="mdi:home-heart",
-        sidebar_title="LoveHome",
-        sidebar_icon="mdi:home-heart",
-        config={"url": f"{PANEL_URL}/index.html"},
-        embed_iframe=True,
-        require_admin=False,
-    )
-    _LOGGER.info("LoveHome 仪表盘已启用：侧边栏入口 LoveHome，配置文件 %s", config_path)
+    # 4) 注册侧边栏面板（iframe 方式, 不需要 web component）
+    #    直接用 frontend 内置注册, embed_iframe=True 让 HA 加载我们的 HTML
+    from homeassistant.components import frontend
+
+    try:
+        frontend.async_register_built_in_panel(
+            hass,
+            component_name="iframe",
+            sidebar_title="LoveHome",
+            sidebar_icon="mdi:home-heart",
+            frontend_url_path="lovehome",
+            config={"url": f"{PANEL_URL}/index.html"},
+            require_admin=False,
+        )
+        _LOGGER.info("LoveHome 仪表盘已启用：侧边栏入口 LoveHome，配置文件 %s", config_path)
+    except Exception as exc:
+        # 兜底：panel_custom API 可能随 HA 版本变化, 只记日志不崩 setup
+        _LOGGER.warning("侧边栏面板注册失败(不影响主功能): %s", exc)
+        _LOGGER.warning("请手动在 Dashboard 添加【网页卡片 iframe】→ 地址: /local/lovehome/index.html")
+
     return True
 
 

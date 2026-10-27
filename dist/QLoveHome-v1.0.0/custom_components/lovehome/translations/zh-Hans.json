@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "LoveHome 家庭仪表盘",
+        "description": "点击「提交」即可完成安装。\n\n安装后：\n• 侧边栏自动出现 LoveHome 入口\n• 仪表盘配置保存在 HA 服务器上（/config/lovehome/config.json）\n• 任何浏览器、手机、其他电脑打开 HA，看到的都是同一个家"
+      }
+    },
+    "abort": {
+      "already_configured": "LoveHome 已经安装过了，直接从侧边栏进入即可。"
+    }
+  }
+}
