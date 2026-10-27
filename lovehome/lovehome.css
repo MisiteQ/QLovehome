@@ -2317,6 +2317,21 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .bulk-state.off { background: rgba(107,114,128,0.15); color: #6b7280; }
 .bulk-state.unavailable { background: rgba(239,68,68,0.15); color: #ef4444; }
 
+/* 新批量导入：按设备卡片分组 */
+.bulk-dev-list { display: flex; flex-direction: column; gap: 8px; }
+.bulk-dev-card { border: 1px solid var(--bd2, #e3e6eb); border-radius: 8px; overflow: hidden; }
+.bulk-dev-card.all-already { opacity: 0.5; }
+.bulk-dev-head { padding: 8px 12px; background: var(--bg2, #f4f6f9); display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--bd2, #e3e6eb); }
+.bulk-dev-label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.bulk-dev-label input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--amber); }
+.bulk-dev-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--s3, #8892a6); }
+.bulk-dev-kind { background: rgba(255,170,40,0.15); color: var(--amber-2, #e08a20); padding: 1px 6px; border-radius: 6px; font-weight: 500; }
+.bulk-dev-model { opacity: 0.7; font-family: ui-monospace, monospace; font-size: 10px; }
+.bulk-dev-count { font-weight: 500; }
+.bulk-dev-ents { display: flex; flex-direction: column; padding: 4px 8px; gap: 2px; max-height: 240px; overflow-y: auto; }
+.lh-ent-picker { position: relative; }
+.lh-ent-dropdown { position: fixed; background: var(--bg1, #fff); border: 1px solid var(--bd2, #e3e6eb); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 9999; overflow: hidden; }
+
 /* 选中实体后的存在性提示条 */
 .lh-ent-status {
   font-size: 12px; line-height: 1.6; padding: 7px 11px; border-radius: 8px;

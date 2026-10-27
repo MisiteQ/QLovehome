@@ -80,8 +80,6 @@
 
   /* 当前户型图 Tab 的「结束绘制」回调（全局只挂一个 mouseup 监听，切换 tab 时替换） */
   let planEndDraw = null;
-  /* 全局复用的实体下拉节点 */
-  let entDropdown = null;
   /* 列表多选：按 tab 分开记（devices / rooms） */
   const multiSel = { devices: new Set(), rooms: new Set() };
   /* 户型图多选：'r:<roomId>' / 'd:<devId>' */
@@ -1522,13 +1520,20 @@
    * 用法: createEntityPicker(inputEl, { domains: ['sensor','binary_sensor'], value: 'xxx' })
    * ══════════════════════════════════════════════════════ */
   function haStates() {
+    if (haStates._cached) return haStates._cached;
     try {
       const h = window.parent && window.parent.document
         ? window.parent.document.querySelector('home-assistant')
         : null;
-      return h && h.hass && h.hass.states ? h.hass.states : null;
-    } catch (e) { return null; }
+      if (h && h.hass && h.hass.states) {
+        haStates._cached = h.hass.states;
+        return haStates._cached;
+      }
+    } catch (e) { /* ignore */ }
+    return null;
   }
+  // 每 10 秒清一次缓存（HA 可能重新连接）
+  setInterval(() => { haStates._cached = null; }, 10000);
 
   function createEntityPicker(inputEl, opts) {
     opts = opts || {};
@@ -1541,15 +1546,10 @@
     const hiddenInp = wrapper.querySelector('.lh-ent-value');
     const statusEl = wrapper.querySelector('.lh-ent-status');
 
-    // dropdown 渲染到 body 上，用 position: fixed（避免被 dialog overflow 裁切）
-    // 全局复用同一个节点，避免每开一次弹窗就多挂一个
-    const dropdown = entDropdown || (entDropdown = (() => {
-      const n = el('div', 'lh-ent-dropdown');
-      n.hidden = true;
-      document.body.appendChild(n);
-      return n;
-    })());
+    // 每个 picker 自己的 dropdown（不再全局共享，避免多个 picker 互相覆盖）
+    const dropdown = el('div', 'lh-ent-dropdown');
     dropdown.hidden = true;
+    document.body.appendChild(dropdown);
 
     // 替换原始 input 的位置
     inputEl.parentNode.insertBefore(wrapper, inputEl);
@@ -1561,21 +1561,24 @@
 
     let allEntities = null;   // { recommended: [...], others: [...] }
     let searchTimer = null;
+    let pickerOpen = false;
 
     // 动态定位 dropdown（position: fixed 方式）
     function positionDropdown() {
       const r = searchInp.getBoundingClientRect();
       dropdown.style.left = r.left + 'px';
       dropdown.style.top = (r.bottom + 4) + 'px';
-      dropdown.style.width = r.width + 'px';
+      dropdown.style.width = Math.max(r.width, 320) + 'px';
+      dropdown.style.maxHeight = '320px';
+      dropdown.style.overflowY = 'auto';
       // 空间不足时翻到上面
       const spaceBelow = window.innerHeight - r.bottom - 8;
-      if (spaceBelow < 100 && r.top > spaceBelow) {
-        dropdown.style.top = (r.top - dropdown.offsetHeight - 4) + 'px';
+      if (spaceBelow < 120 && r.top > 120) {
+        dropdown.style.top = Math.max(8, r.top - dropdown.offsetHeight - 4) + 'px';
       }
     }
 
-    /* 读取 HA 全部真实实体（原始列表只缓存一次；「推荐/全部」的分组每次按当前类型重算） */
+    /* 读取 HA 全部真实实体（原始列表只缓存一次） */
     function loadEntities() {
       const states = haStates();
       if (!states) return null;
@@ -1589,20 +1592,18 @@
           domain: eid.split('.')[0]
         });
       }
+      // 排序：推荐类型先，其他类型按 friendly_name 排序
+      const rec = opts.domains || [];
+      list.sort((a, b) => {
+        const ra = rec.includes(a.domain) ? 0 : 1;
+        const rb = rec.includes(b.domain) ? 0 : 1;
+        if (ra !== rb) return ra - rb;
+        return (a.name || '').localeCompare(b.name || '');
+      });
       return list;
     }
-    function groups() {
-      const raw = allEntities || (allEntities = loadEntities());
-      if (!raw) return null;
-      const rec = opts.domains || [];
-      const byName = (a, b) => (a.name || '').localeCompare(b.name || '');
-      return {
-        recommended: raw.filter((e) => rec.includes(e.domain)).sort(byName),
-        others: raw.filter((e) => !rec.includes(e.domain)).sort(byName)
-      };
-    }
 
-    /* 实体状态条：显示所选实体是否真实存在于 HA、friendly_name、当前状态 */
+    /* 实体状态条 */
     function updateStatus() {
       const eid = hiddenInp.value;
       const states = haStates();
@@ -1612,59 +1613,63 @@
       if (s) {
         const name = (s.attributes && s.attributes.friendly_name) || '';
         statusEl.className = 'lh-ent-status ok';
-        statusEl.textContent = '✓ ' + eid + (name ? ' · ' + name : '') + ' · 当前状态: ' + s.state;
+        statusEl.textContent = '✓ ' + eid + (name ? ' · ' + name : '') + ' · ' + s.state;
       } else {
         statusEl.className = 'lh-ent-status bad';
-        statusEl.textContent = '⚠ 实体 ' + eid + ' 在 HA 中不存在 —— 请从列表中选择真实设备';
+        statusEl.textContent = '⚠ 实体 ' + eid + ' 不存在';
       }
     }
 
     function itemHtml(e) {
+      const stClass = e.state === 'on' ? 'on' : (e.state === 'unavailable' ? 'unavailable' : '');
       return `<div class="lh-ent-item" data-eid="${e.entity_id}">
         <span class="lh-ent-name">${e.name}</span>
         <code class="lh-ent-id">${e.entity_id}</code>
-        <span class="lh-ent-state">${e.state}</span>
+        <span class="lh-ent-state ${stClass}">${e.state}</span>
       </div>`;
     }
 
     function renderDropdown(filter) {
       filter = (filter || '').trim().toLowerCase();
-      const g = groups();
-      if (!g) {
-        // hass 不可用 —— 退化为普通输入
+      const raw = allEntities || (allEntities = loadEntities());
+      if (!raw) {
         dropdown.hidden = true;
         return;
       }
+      const rec = opts.domains || [];
       const match = (e) => !filter ||
         e.entity_id.toLowerCase().includes(filter) ||
-        (e.name || '').toLowerCase().includes(filter);
+        (e.name || '').toLowerCase().includes(filter) ||
+        e.domain.toLowerCase().includes(filter);
+
+      const recList = raw.filter((e) => rec.includes(e.domain) && match(e));
+      const otherList = raw.filter((e) => !rec.includes(e.domain) && match(e));
+
       let html = '';
       let count = 0;
-      const renderList = (items, title) => {
-        const m = items.filter(match);
-        if (!m.length) return;
-        html += `<div class="lh-ent-group-title">${title}</div>`;
-        for (const e of m.slice(0, 50)) {  // 每组最多 50 条防卡顿
-          html += itemHtml(e);
-          count++;
-        }
-      };
-      if (opts.domains && opts.domains.length) {
-        renderList(g.recommended, '推荐类型（' + opts.domains.join(' / ') + '）');
+      if (recList.length) {
+        html += `<div class="lh-ent-group-title">推荐 ${rec.join(' / ')}</div>`;
+        for (const e of recList.slice(0, 80)) { html += itemHtml(e); count++; }
       }
-      renderList(g.others, '全部实体');
+      if (otherList.length) {
+        html += `<div class="lh-ent-group-title">全部实体（${otherList.length}）</div>`;
+        for (const e of otherList.slice(0, 200)) { html += itemHtml(e); count++; }
+      }
+      if (!count) {
+        html = `<div class="lh-ent-empty">没有匹配的实体 · 改个关键词或清空搜索框</div>`;
+      }
       dropdown.innerHTML = html;
-      dropdown.hidden = count === 0;
-      if (!dropdown.hidden) {
-        requestAnimationFrame(positionDropdown);  // 等 DOM 更新后再定位
-      }
+      dropdown.hidden = false;
+      pickerOpen = true;
+      requestAnimationFrame(positionDropdown);
 
       dropdown.querySelectorAll('.lh-ent-item').forEach((it) => {
         it.addEventListener('mousedown', (ev) => {
-          ev.preventDefault();
-          const eid = it.dataset.eid;
-          setValue(eid);
+          ev.preventDefault();        // 阻止 blur
+          ev.stopPropagation();
+          setValue(it.dataset.eid);
           dropdown.hidden = true;
+          pickerOpen = false;
         });
       });
     }
@@ -1672,39 +1677,73 @@
     function setValue(eid) {
       searchInp.value = eid;
       hiddenInp.value = eid;
-      inputEl.value = eid;       // 同步回原 input
+      inputEl.value = eid;
       inputEl.dispatchEvent(new Event('input', { bubbles: true }));
       inputEl.dispatchEvent(new Event('change', { bubbles: true }));
       updateStatus();
       if (opts.onChange) opts.onChange(eid);
     }
 
-    searchInp.addEventListener('focus', () => renderDropdown(searchInp.value));
+    // 事件：focus → 打开 / 更新
+    searchInp.addEventListener('focus', () => {
+      // 重新加载（如果之前 HA 还没连上）
+      if (!allEntities) allEntities = loadEntities();
+      renderDropdown(searchInp.value);
+    });
+    searchInp.addEventListener('click', () => {
+      if (dropdown.hidden) renderDropdown(searchInp.value);
+    });
+
+    // 事件：输入 → 防抖过滤
     searchInp.addEventListener('input', () => {
       clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => renderDropdown(searchInp.value), 120);
+      searchTimer = setTimeout(() => renderDropdown(searchInp.value), 150);
     });
+
+    // 事件：blur → 延迟关闭（等 mousedown 先触发）
     searchInp.addEventListener('blur', () => {
-      // 如果没有选 dropdown 项而是直接输了值，也接受
       setTimeout(() => {
-        dropdown.hidden = true;
+        // 如果用户点击了 dropdown 里的项，mousedown 先触发 setValue → 这里 dropdown 已经隐藏
+        // 如果用户点了别处，也应该关闭
+        if (!dropdown.hidden) {
+          dropdown.hidden = true;
+          pickerOpen = false;
+        }
+        // 如果用户直接输入了值，也接受
         const v = searchInp.value.trim();
         if (v && v !== hiddenInp.value) setValue(v);
-      }, 150);  // 等 mousedown 先触发
+      }, 200);
     });
+
+    // 事件：Esc 关闭
     searchInp.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { dropdown.hidden = true; searchInp.blur(); }
+      if (e.key === 'Escape') { dropdown.hidden = true; pickerOpen = false; searchInp.blur(); }
+      if (e.key === 'Enter' && !dropdown.hidden) {
+        // Enter 选第一项
+        const first = dropdown.querySelector('.lh-ent-item');
+        if (first) { setValue(first.dataset.eid); dropdown.hidden = true; pickerOpen = false; }
+      }
     });
 
     // 点击外部关闭
-    document.addEventListener('click', (e) => {
-      if (!wrapper.contains(e.target)) dropdown.hidden = true;
+    document.addEventListener('mousedown', (e) => {
+      if (!pickerOpen || dropdown.hidden) return;
+      if (dropdown.contains(e.target)) return;        // 点在 dropdown 里 → 不关
+      if (wrapper.contains(e.target)) return;         // 点在 input 里 → 不关（click 事件自己处理）
+      dropdown.hidden = true;
+      pickerOpen = false;
     });
 
-    // 初始值也校验一次（编辑已有实体时马上能看到它是否还存在）
+    // resize / scroll 时重定位
+    window.addEventListener('resize', () => { if (!dropdown.hidden) positionDropdown(); });
+
+    // 初始值校验
     updateStatus();
 
-    return { wrapper, setValue, searchInp, updateStatus };
+    return {
+      wrapper, setValue, searchInp, updateStatus,
+      destroy() { dropdown.remove(); pickerOpen = false; }
+    };
   }
 
   /* ══════════════════════════════════════════════════════
@@ -1794,140 +1833,263 @@
   }
 
   /* ══════════════════════════════════════════════════════
-   * 批量从 HA 实体导入：按 domain 分组列实体，用户勾选 → 自动创建设备
+   * 批量从 HA 导入：按「物理设备」分组，一台设备下面所有实体一起显示
+   * 用户可以勾整台设备（全部实体一起导入），也可以只勾某个实体
    * ══════════════════════════════════════════════════════ */
-  function openBulkImport() {
+  async function openBulkImport() {
     const states = haStates();
     if (!states) { alert('未连接到 Home Assistant'); return; }
+    const h = window.parent && window.parent.document
+      ? window.parent.document.querySelector('home-assistant') : null;
+    const canWS = h && h.hass && typeof h.hass.callWS === 'function';
 
-    // 已经绑定过的实体 → 跳过（避免重复）
+    // 已经绑定过的实体 → 标记为 already
     const existingEntities = new Set((window.LH.devices || []).map((d) => d.entity).filter(Boolean));
 
-    // 收集 HA 里的实体，按 domain 分组；只跳过纯脚本/辅助类
     const SKIP_DOMAINS = new Set(['history_stats', 'input_boolean',
                                   'input_select', 'input_number', 'input_datetime', 'script', 'scene',
                                   'automation', 'group', 'person', 'zone', 'sun',
                                   'timer', 'counter', 'proximity', 'update', 'calendar',
                                   'schedule', 'todo', 'shopping_list', 'image_processing',
                                   'stt', 'tts', 'assist_satellite', 'conversation', 'notify']);
-    const groups = {};  // domain -> [{eid, name, state, domain}]
+
+    // 优先从 HA API 拿完整的 entity_registry（有 device_id），不然从 states 退化
+    let entityList = [], deviceList = [];
+    if (canWS) {
+      try {
+        const [ents, devs] = await Promise.all([
+          h.hass.callWS({ type: 'config/entity_registry/list' }),
+          h.hass.callWS({ type: 'config/device_registry/list' })
+        ]);
+        entityList = ents || [];
+        deviceList = devs || [];
+      } catch (e) { /* 退化 */ }
+    }
+
+    const DEV_MAP = {};  // device_id -> device object
+    deviceList.forEach((d) => { DEV_MAP[d.id] = d; });
+
+    // 收集所有实体（优先用 entity_registry，没有就从 states 拿）
+    const entities = [];
+    entityList.forEach((e) => {
+      if (e.disabled_by || e.hidden_by) return;
+      const domain = e.entity_id.split('.')[0];
+      if (SKIP_DOMAINS.has(domain)) return;
+      const s = states[e.entity_id];
+      if (!s) return;  // 已经不存在了
+      const fname = (e.name || s.attributes && s.attributes.friendly_name) || e.entity_id;
+      entities.push({
+        eid: e.entity_id, domain,
+        name: fname, state: s.state,
+        device_id: e.device_id || null,
+        platform: e.platform || '',
+        already: existingEntities.has(e.entity_id)
+      });
+    });
+    // 补充：entity_registry 里没有的（比如 MQTT 自动发现的某些）
     for (const eid of Object.keys(states)) {
       const domain = eid.split('.')[0];
       if (SKIP_DOMAINS.has(domain)) continue;
+      if (entityList.some((x) => x.entity_id === eid)) continue;
       const s = states[eid];
       const fname = (s.attributes && s.attributes.friendly_name) || eid;
-      if (!groups[domain]) groups[domain] = [];
-      groups[domain].push({
-        eid, name: fname, state: s.state, domain,
+      entities.push({
+        eid, domain, name: fname, state: s.state,
+        device_id: null, platform: '',
         already: existingEntities.has(eid)
       });
     }
-    // domain 中文名 + 排序（常用的放前面）
-    const DOMAIN_LABEL = {
-      light: '💡 灯光', switch: '🔌 开关/插座', climate: '❄️ 空调/采暖',
-      cover: '🪟 窗帘', fan: '🌀 风扇', media_player: '📺 影音',
-      lock: '🔒 门锁', camera: '📷 摄像头', water_heater: '🚿 热水器',
-      humidifier: '💨 加湿器', vacuum: '🤖 扫地机', siren: '🚨 警报器',
-      valve: '💧 水阀', select: '📋 选项', number: '🔢 数值',
-      button: '🔘 按钮', sensor: '📏 传感器', binary_sensor: '⚡ 状态传感器',
-      device_tracker: '📍 定位', remote: '📱 遥控器'
+
+    // 按 device 分组
+    const DEV_KIND = {
+      'xiaomi_home': '米家', 'xiaomi_miot': '米家',
+      'midea': '美的', 'dehumidifier': '美的',
+      'aqara': '绿米', 'zha': 'Zigbee', 'zigbee2mqtt': 'Zigbee',
+      'mqtt': 'MQTT', 'tuya': '涂鸦', 'homekit': 'HomeKit',
+      'esphome': 'ESPHome', 'google_cast': 'Chromecast',
+      'yeelight': 'Yeelight', 'philips_android_tv': '飞利浦',
+      'media_player': '影音', 'switch': '开关', 'light': '灯',
+      'climate': '空调', 'cover': '窗帘', 'fan': '风扇',
+      'lock': '门锁', 'camera': '摄像头', 'water_heater': '热水器',
+      'humidifier': '加湿器', 'vacuum': '扫地机', 'siren': '警报',
+      'select': '选项', 'number': '数值', 'button': '按钮',
+      'sensor': '传感器', 'binary_sensor': '状态传感器', 'remote': '遥控',
+      'valve': '水阀', 'device_tracker': '定位', 'lawn_mower': '割草机'
     };
-    const DOMAIN_ORDER = ['light', 'switch', 'climate', 'cover', 'fan', 'media_player',
-                          'lock', 'camera', 'water_heater', 'humidifier', 'vacuum', 'siren',
-                          'valve', 'remote', 'button', 'select', 'number',
-                          'sensor', 'binary_sensor', 'device_tracker'];
 
-    // 构建弹窗
+    // 把实体按 device 聚合
+    const deviceGroups = {};  // key=device_id 或 'no-dev-<platform>'
+    const noDev = [];  // 没有 device_id 的散实体
+    entities.forEach((e) => {
+      if (e.device_id && DEV_MAP[e.device_id]) {
+        const dv = DEV_MAP[e.device_id];
+        const key = e.device_id;
+        if (!deviceGroups[key]) {
+          const name = dv.name_by_user || dv.name || e.name.split(' ')[0] || '未知设备';
+          const platform = dv.manufacturer || dv.model || e.platform || '';
+          deviceGroups[key] = {
+            key, name, platform, model: dv.model || '',
+            ents: [],
+            already: false,
+            domains: new Set()
+          };
+        }
+        deviceGroups[key].ents.push(e);
+        deviceGroups[key].domains.add(e.domain);
+        if (e.already) deviceGroups[key].already = true;
+      } else {
+        noDev.push(e);
+      }
+    });
+
+    // 按平台 / 数量排序：多实体设备放前面
+    const devArr = Object.values(deviceGroups).sort((a, b) => b.ents.length - a.ents.length);
+
+    // 构建弹窗 HTML
     const dlg = el('div', 'lh-ed-dialog bulk-import');
-    const existingCount = Object.values(groups).reduce((s, arr) => s + arr.filter((e) => e.already).length, 0);
-    const totalAvailable = Object.values(groups).reduce((s, arr) => s + arr.filter((e) => !e.already).length, 0);
-
-    let body = `<div class="lh-ed-dialog-mask"></div>
-      <div class="lh-ed-dialog-body" style="max-width:780px;max-height:82vh;display:flex;flex-direction:column">
-        <div class="lh-ed-dialog-head"><b>🔍 从 Home Assistant 批量导入设备</b>
+    let html = `<div class="lh-ed-dialog-mask"></div>
+      <div class="lh-ed-dialog-body" style="max-width:860px;max-height:85vh;display:flex;flex-direction:column">
+        <div class="lh-ed-dialog-head"><b>🔍 从 Home Assistant 批量导入</b>
           <button class="lh-ed-dialog-close" type="button">×</button></div>
         <div style="padding:8px 16px;color:var(--s3);font-size:13px;border-bottom:1px solid var(--bd2)">
-          HA 中可用控制类实体 <b style="color:var(--amber-2)">${totalAvailable}</b> 个，已在面板里 <b>${existingCount}</b> 个。勾选要添加的 → 点「导入」自动创建设备
-        </div>`;
+          按物理设备分组 · 勾整台设备（一次加全部实体）或单独勾某个实体 · 已有 <b style="color:var(--amber-2)">${existingEntities.size}</b> 个实体在面板中
+        </div>
+        <div style="padding:6px 12px;border-bottom:1px solid var(--bd2);display:flex;gap:12px;font-size:12px">
+          <input type="text" id="bulkSearch" placeholder="🔎 搜索设备名 / 实体 / domain..." style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--bd2);background:var(--bg2, #f7f9fc);color:inherit">
+          <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="bulkHideAlready"> 隐藏已在面板</label>
+        </div>
+        <div class="bulk-dev-list" id="bulkDevList" style="flex:1;overflow-y:auto;padding:8px">`;
 
-    DOMAIN_ORDER.forEach((dom) => {
-      const list = groups[dom];
-      if (!list || !list.length) return;
-      const alreadyCnt = list.filter((e) => e.already).length;
-      body += `<div class="bulk-group">
-        <div class="bulk-group-head">
-          <b>${DOMAIN_LABEL[dom] || dom}</b>
-          <span class="hint">${list.length} 个${alreadyCnt ? '（已加 ' + alreadyCnt + '）' : ''}</span>
-        </div><div class="bulk-group-list">`;
-      list.forEach((e) => {
-        body += `<label class="bulk-item${e.already ? ' already' : ''}">
-          <input type="checkbox" data-eid="${e.eid}" ${e.already ? 'disabled title="已在面板中"' : ''}>
+    // 渲染每个设备
+    devArr.forEach((dev) => {
+      const allAlready = dev.ents.every((e) => e.already);
+      const someAlready = dev.ents.some((e) => e.already);
+      const doms = Array.from(dev.domains);
+      const kind = DEV_KIND[dev.platform] || doms.map((d) => DEV_KIND[d]).filter(Boolean)[0] || '';
+      html += `<div class="bulk-dev-card${allAlready ? ' all-already' : ''}" data-dev="${dev.key}">
+        <div class="bulk-dev-head">
+          <label class="bulk-dev-label">
+            <input type="checkbox" class="bulk-dev-check" data-dev="${dev.key}" ${allAlready ? 'disabled' : ''}>
+            <b class="bulk-dev-name">📱 ${dev.name}</b>
+          </label>
+          <span class="bulk-dev-meta">
+            ${kind ? '<span class="bulk-dev-kind">' + kind + '</span>' : ''}
+            <span class="bulk-dev-model">${dev.model || dev.platform || ''}</span>
+            <span class="bulk-dev-count">${dev.ents.length} 实体${someAlready ? ' · 已有部分接入' : ''}</span>
+          </span>
+        </div>
+        <div class="bulk-dev-ents">`;
+      dev.ents.forEach((e) => {
+        html += `<label class="bulk-item${e.already ? ' already' : ''}">
+          <input type="checkbox" class="bulk-ent-check" data-dev="${dev.key}" data-eid="${e.eid}" ${e.already ? 'disabled title="已在面板中"' : ''}>
+          <span class="bulk-name">${e.name}</span>
+          <code class="bulk-id">${e.domain}</code>
+          <span class="bulk-state ${e.state === 'on' ? 'on' : (e.state === 'unavailable' ? 'unavailable' : '')}">${e.state}</span>
+        </label>`;
+      });
+      html += '</div></div>';
+    });
+
+    // 没有 device_id 的散实体
+    if (noDev.length) {
+      html += `<div class="bulk-dev-card"><div class="bulk-dev-head">
+        <b class="bulk-dev-name">🔬 无归属设备的散实体</b>
+        <span class="bulk-dev-meta"><span class="bulk-dev-count">${noDev.length} 个</span></span>
+      </div><div class="bulk-dev-ents">`;
+      noDev.forEach((e) => {
+        html += `<label class="bulk-item${e.already ? ' already' : ''}">
+          <input type="checkbox" class="bulk-ent-check" data-eid="${e.eid}" ${e.already ? 'disabled' : ''}>
           <span class="bulk-name">${e.name}</span>
           <code class="bulk-id">${e.eid}</code>
           <span class="bulk-state">${e.state}</span>
         </label>`;
       });
-      body += '</div></div>';
-    });
+      html += '</div></div>';
+    }
 
-    // 不在预定义列表里但存在的 domain 也列出来
-    Object.keys(groups).forEach((dom) => {
-      if (DOMAIN_ORDER.indexOf(dom) >= 0) return;
-      const list = groups[dom];
-      if (!list || !list.length) return;
-      body += `<div class="bulk-group">
-        <div class="bulk-group-head"><b>${dom}</b><span class="hint">${list.length} 个</span></div>
-        <div class="bulk-group-list">`;
-      list.forEach((e) => {
-        body += `<label class="bulk-item${e.already ? ' already' : ''}">
-          <input type="checkbox" data-eid="${e.eid}" ${e.already ? 'disabled' : ''}>
-          <span class="bulk-name">${e.name}</span>
-          <code class="bulk-id">${e.eid}</code>
-          <span class="bulk-state">${e.state}</span>
-        </label>`;
-      });
-      body += '</div></div>';
-    });
-
-    body += `<div class="lh-ed-dialog-foot" style="border-top:1px solid var(--bd2);padding:10px 16px">
-      <button class="lh-ed-btn" id="bulkCancel" type="button">取消</button>
-      <span class="hint" id="bulkCount" style="margin-left:12px">已勾选 0 个</span>
-      <button class="lh-ed-btn primary" id="bulkDo" type="button" style="margin-left:auto">导入 →</button>
-    </div></div>`;
-    dlg.innerHTML = body;
+    html += `</div>
+      <div class="lh-ed-dialog-foot" style="border-top:1px solid var(--bd2);padding:10px 16px">
+        <button class="lh-ed-btn" id="bulkCancel" type="button">取消</button>
+        <span class="hint" id="bulkCount" style="margin-left:12px">已勾选 0 个</span>
+        <button class="lh-ed-btn primary" id="bulkDo" type="button" style="margin-left:auto">导入 →</button>
+      </div></div>`;
+    dlg.innerHTML = html;
     document.body.appendChild(dlg);
 
-    const closeIt = () => dlg.classList.remove('open');
+    const closeIt = () => dlg.remove();
     setTimeout(() => dlg.classList.add('open'), 10);
     dlg.querySelector('.lh-ed-dialog-close').onclick = closeIt;
     dlg.querySelector('.lh-ed-dialog-mask').onclick = closeIt;
     dlg.querySelector('#bulkCancel').onclick = closeIt;
 
-    const countEl = dlg.querySelector('#bulkCount');
-    const refreshCount = () => {
-      const n = dlg.querySelectorAll('input[type=checkbox]:checked').length;
-      countEl.textContent = '已勾选 ' + n + ' 个';
-    };
+    // 设备级 checkbox 联动（勾整台 → 全勾实体）
+    dlg.querySelectorAll('.bulk-dev-check').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const key = cb.dataset.dev;
+        dlg.querySelectorAll(`.bulk-ent-check[data-dev="${key}"]:not(:disabled)`).forEach((ec) => {
+          ec.checked = cb.checked;
+        });
+        refreshCount();
+      });
+    });
+
+    // 搜索 + 隐藏已接入
+    const searchInp = dlg.querySelector('#bulkSearch');
+    const hideAlready = dlg.querySelector('#bulkHideAlready');
+    const cards = dlg.querySelectorAll('.bulk-dev-card');
+    function applyFilter() {
+      const q = (searchInp.value || '').trim().toLowerCase();
+      const hide = hideAlready.checked;
+      cards.forEach((card) => {
+        if (hide && card.classList.contains('all-already')) { card.style.display = 'none'; return; }
+        if (!q) { card.style.display = ''; return; }
+        const text = card.textContent.toLowerCase();
+        card.style.display = text.includes(q) ? '' : 'none';
+      });
+    }
+    let searchTimer = null;
+    searchInp.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(applyFilter, 120);
+    });
+    hideAlready.addEventListener('change', applyFilter);
+
+    function refreshCount() {
+      const n = dlg.querySelectorAll('.bulk-ent-check:checked:not(.bulk-dev-check)').length
+        + dlg.querySelectorAll('.bulk-ent-check.bulk-dev-check:checked').length;
+      const realChecked = dlg.querySelectorAll('.bulk-ent-check:checked').length;
+      dlg.querySelector('#bulkCount').textContent = '已勾选 ' + realChecked + ' 个实体';
+    }
     dlg.addEventListener('change', refreshCount);
 
     dlg.querySelector('#bulkDo').onclick = () => {
-      const cbs = dlg.querySelectorAll('input[type=checkbox]:checked');
-      if (!cbs.length) { closeIt(); return; }
-      // 把面板里现有设备清空？不，保留，追加新的
+      const checked = dlg.querySelectorAll('.bulk-ent-check:checked');
+      const toAdd = [];
+      checked.forEach((cb) => {
+        if (!cb.dataset.eid) return;
+        toAdd.push(cb.dataset.eid);
+      });
+      if (!toAdd.length) { closeIt(); return; }
       const existing = window.LH.devices || [];
-      cbs.forEach((cb) => {
-        const eid = cb.dataset.eid;
+      const plan = window.LH.plan || { w: 620, h: 692 };
+      const cx = Math.round(plan.w / 2), cy = Math.round(plan.h / 2);
+      // 去重
+      const seen = new Set();
+      toAdd.forEach((eid) => {
+        if (seen.has(eid)) return;
+        seen.add(eid);
         const domain = eid.split('.')[0];
         const kind = DOMAIN_KIND[domain] || 'appliance';
         const s = states[eid];
         const fname = (s.attributes && s.attributes.friendly_name) || eid;
+        const idx = existing.length + seen.size - 1;
+        const angle = (idx % 8) * (Math.PI / 4);
+        const radius = 30 + Math.floor(idx / 8) * 30;
+        const x = Math.max(30, Math.min(plan.w - 30, Math.round(cx + Math.cos(angle) * radius)));
+        const y = Math.max(30, Math.min(plan.h - 30, Math.round(cy + Math.sin(angle) * radius)));
         existing.push({
-          id: genId('d'),
-          name: fname,
-          kind: kind,
-          entity: eid,
-          room: '',
-          x: null, y: null
+          id: genId('d'), name: fname, kind, entity: eid,
+          room: '', x, y
         });
       });
       window.LH.devices = existing;
@@ -1935,7 +2097,7 @@
       closeIt();
       rerenderEditorTab();
       document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
-      toastHint('已导入 ' + cbs.length + ' 台设备，继续在编辑器里配置房间/位置');
+      toastHint('已导入 ' + seen.size + ' 台设备（默认位置画布中心，编辑器里拖到对的房间）');
     };
   }
 
@@ -2039,7 +2201,10 @@
   const DOMAIN_KIND = {
     light: 'light', climate: 'ac', cover: 'cover', lock: 'lock', camera: 'cam',
     media_player: 'media', fan: 'fan', water_heater: 'heater', humidifier: 'appliance',
-    vacuum: 'appliance', siren: 'appliance', switch: 'plug', sensor: 'sensor', binary_sensor: 'sensor'
+    vacuum: 'appliance', siren: 'bell', switch: 'plug', sensor: 'sensor', binary_sensor: 'sensor',
+    valve: 'appliance', remote: 'media', select: 'panel', number: 'sensor', button: 'panel',
+    date: 'sensor', time: 'sensor', text: 'sensor', lawn_mower: 'appliance',
+    event: 'panel'
   };
 
   function openDeviceEditor(id, preset) {
