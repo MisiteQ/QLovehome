@@ -1,0 +1,38 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+
+      - name: Python syntax check
+        run: |
+          python3 -m py_compile gen_lovehome_data.py || true
+          python3 -m py_compile extract_rooms.py || true
+          python3 -m py_compile calib_real.py || true
+          python3 -m py_compile custom_components/lovehome/__init__.py
+          python3 -m py_compile custom_components/lovehome/config_flow.py
+          python3 -m py_compile custom_components/lovehome/const.py
+
+      - name: JS syntax check
+        run: |
+          node --check lovehome/lovehome.js
+          node --check lovehome/lovehome-editor.js
+
+      - name: manifest.json validation
+        run: |
+          python3 -c "import json; json.load(open('custom_components/lovehome/manifest.json'))"
+          python3 -c "import json; json.load(open('hacs.json'))"

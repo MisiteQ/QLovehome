@@ -1,0 +1,128 @@
+# QLovehome 示例：模板传感器（镜像）
+# ─────────────────────────────────────────────────────────────
+# 这个文件演示面板里那批 switch.*_online / switch.*_running 之类的「镜像实体」是怎么来的：
+# 用 HA 的 template 平台，把设备真实状态镜像成一颗稳定、可读的实体。
+# 面板不强依赖这些镜像（没有就显示「—」），但有它们体验更好：
+#   switch.heater_burning      热水器真燃烧状态（设备自己的 state 有兜底值，不可信）
+#   switch.washer_running      洗衣机是否在运行（由进度传感器推导）
+#   switch.router_wan / hub_online / gateway_online   网络设备在线状态
+#   switch.living_cam_online / kitchen_cam_online     相机在线状态
+#   sensor.router_download_speed / upload_speed       路由器网速
+# 用法：把下面内容并进你 HA 的 configuration.yaml（或 templates: !include 拆分），
+#       重载 / 重启 HA 后生效。实体名以你 HA 里的实际设备为准。
+
+template:
+  - switch:
+      # 燃气热水器：真燃烧标志读 water_heater 的 burning_state 属性
+      # （设备实体自带的 state 有兜底值，熄火也可能显示 gas，别信它）
+      - name: "热水器燃烧"
+        unique_id: heater_burning
+        state: "{{ state_attr('water_heater.gas_water_heater_water_heater', 'burning_state') }}"
+        turn_on:
+          service: water_heater.set_operation_mode
+          target:
+            entity_id: water_heater.gas_water_heater_water_heater
+          data:
+            operation_mode: gas
+        turn_off:
+          service: water_heater.set_operation_mode
+          target:
+            entity_id: water_heater.gas_water_heater_water_heater
+          data:
+            operation_mode: off
+
+      # 热水器通电状态（示例：跟设备开关域走，按你的实际实体改）
+      - name: "热水器通电"
+        unique_id: heater_power
+        state: "{{ states('water_heater.gas_water_heater_water_heater') not in ['unavailable', 'unknown', 'off'] }}"
+
+      # 洗衣机运行中：进度不是待机/未知就算在跑
+      - name: "洗衣机运行"
+        unique_id: washer_running
+        state: "{{ states('sensor.washer_progress') not in ['Idle', 'Unknown', 'unavailable', 'unknown'] }}"
+
+      # 网络设备在线：示例用 command_line/ping 集成或路由器集成的实体，
+      # 把下面 states('...') 换成你 HA 里真实反映在线的实体即可
+      - name: "路由器 WAN"
+        unique_id: router_wan
+        state: "{{ is_state('binary_sensor.router_wan', 'on') }}"
+      - name: "中枢网关在线"
+        unique_id: hub_online
+        state: "{{ states('sensor.hub_status') not in ['unavailable', 'unknown'] }}"
+      - name: "多模网关在线"
+        unique_id: gateway_online
+        state: "{{ states('sensor.gateway_status') not in ['unavailable', 'unknown'] }}"
+
+      # 相机在线：camera 实体不是 unavailable 就算在线（相机取流坏≠相机掉线）
+      - name: "客厅相机在线"
+        unique_id: living_cam_online
+        state: "{{ states('camera.living_ptz_control') not in ['unavailable', 'unknown'] }}"
+      - name: "厨房相机在线"
+        unique_id: kitchen_cam_online
+        state: "{{ states('camera.kitchen_cam_control') not in ['unavailable', 'unknown'] }}"
+
+  - sensor:
+      # 热水器水温 / 设定水温
+      - name: "热水器水温"
+        unique_id: heater_water_temp
+        state: "{{ state_attr('water_heater.gas_water_heater_water_heater', 'current_temperature') }}"
+        unit_of_measurement: "°C"
+      - name: "热水器设定水温"
+        unique_id: heater_target_temp
+        state: "{{ state_attr('water_heater.gas_water_heater_water_heater', 'temperature') }}"
+        unit_of_measurement: "°C"
+
+      # 路由器网速：来源取决于你的路由器集成（小米路由器 / OpenWrt / 软路由等），
+      # 没有对应实体就把这两颗删掉，面板概览的网速卡会自动降级
+      - name: "路由器下载速度"
+        unique_id: router_download_speed
+        state: "{{ states('sensor.router_download') | float(0) }}"
+        unit_of_measurement: "KiB/s"
+      - name: "路由器上传速度"
+        unique_id: router_upload_speed
+        state: "{{ states('sensor.router_upload') | float(0) }}"
+        unit_of_measurement: "KiB/s"
+
+  - binary_sensor:
+      # 家人在线：面板「家中概览」第一张卡就是它。
+      # 底层是 configuration.yaml 里的 command_line ping（见本文件末尾注释），
+      # 一个人有多台设备（手机+平板）就 OR 起来，任一在线即算在家。
+      # 注意：手机 Wi-Fi 休眠时会短时判「离家」，唤醒后自动恢复。
+      - name: "家人一在家"
+        unique_id: family_member_1
+        device_class: presence
+        state: "{{ is_state('binary_sensor.family_phone_a', 'on') or is_state('binary_sensor.family_phone_b', 'on') }}"
+      - name: "家人二在家"
+        unique_id: family_member_2
+        device_class: presence
+        state: "{{ is_state('binary_sensor.family_phone_c', 'on') }}"
+
+
+# ═════════════════════════════════════════════════════════════════
+# 附：家人在线的底层（这段要放进 configuration.yaml，不能放进本文件）
+# ═════════════════════════════════════════════════════════════════
+# HA 2026.10 起 ping 集成的 YAML 平台已移除，只能用 command_line 自己 ping。
+# 注意 command_line 必须用顶层 command_line: 键（挂在 binary_sensor: 平台下
+# 不会报错、但实体根本不创建）。IP 填家里各设备的地址（路由器 DHCP 保留最稳）。
+# 命令结尾的 echo ON/OFF + payload_on/off 不能省：省了命令失败只写日志、
+# 实体一直是 unknown。scan_interval 30 秒一轮，手机休眠时会短时判离家。
+#
+# command_line:
+#   - binary_sensor:
+#       name: family_phone_a
+#       unique_id: family_phone_a
+#       command: 'ping -c 2 -W 2 <设备A的IP> >/dev/null 2>&1 && echo ON || echo OFF'
+#       payload_on: "ON"
+#       payload_off: "OFF"
+#       device_class: connectivity
+#       scan_interval: 30
+#       command_timeout: 15
+#   - binary_sensor:
+#       name: family_phone_b
+#       unique_id: family_phone_b
+#       command: 'ping -c 2 -W 2 <设备B的IP> >/dev/null 2>&1 && echo ON || echo OFF'
+#       payload_on: "ON"
+#       payload_off: "OFF"
+#       device_class: connectivity
+#       scan_interval: 30
+#       command_timeout: 15

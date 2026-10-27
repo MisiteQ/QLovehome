@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "LoveHome Dashboard",
+        "description": "Click Submit to finish the installation.\n\nAfter installation:\n• A LoveHome entry appears in the sidebar\n• Dashboard config is stored on the HA server (/config/lovehome/config.json)\n• Every browser and device sees the same home"
+      }
+    },
+    "abort": {
+      "already_configured": "LoveHome is already installed. Open it from the sidebar."
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+ "sx": 1.73,
+ "sy": 1.85,
+ "ox": -8,
+ "oy": -45,
+ "img": "floorplan.png",
+ "note": "示例值，对应 assets/plan-real.jpg；换底图后跑 python calib_real.py 重新校准"
+}

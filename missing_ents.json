@@ -1,0 +1,39 @@
+[
+ {
+  "name": "客厅摄像机（示例）",
+  "model": "chuangmi.camera.xxx",
+  "plat": "xiaomi_home",
+  "n": 31,
+  "doms": [
+   "button",
+   "light",
+   "number",
+   "select",
+   "sensor",
+   "switch",
+   "text"
+  ],
+  "unavail": false,
+  "ents": [
+   "button.xxx_format",
+   "switch.xxx_on",
+   "sensor.xxx_status"
+  ]
+ },
+ {
+  "name": "阳台洗衣机（示例）",
+  "model": "midea.washer.xxx",
+  "plat": "xiaomi_miot",
+  "n": 4,
+  "doms": [
+   "sensor",
+   "switch"
+  ],
+  "unavail": false,
+  "ents": [
+   "switch.xxx_power",
+   "switch.xxx_start",
+   "sensor.xxx_progress"
+  ]
+ }
+]
