@@ -61,17 +61,23 @@ QLoveHome（**其爱家** 哈哈哈）是怎么来的？
 
 ## 🚀 安装
 
+### ⚠️ v1.0.0 升级到 v1.0.1
+
+v1.0.0 的 `__init__.py` 在 HAOS 上 setup 会报错（`panel_custom` API 签名变了）。**v1.0.1 已修复**。
+如果你之前装过 v1.0.0：**卸载旧版本 → 重新安装 v1.0.1**，或者手动替换 `__init__.py` + 重启 HA。
+
 ### 方式一：HACS 自定义存储库（推荐）
 
 1. **HACS → 集成 → 右上角 ⋮ → 自定义存储库**
 2. URL 填：`https://github.com/MisiteQ/QLovehome`
 3. 类别选：**集成**
 4. 搜索 **QLoveHome** → 安装 → 重启 HA
-5. **设置 → 设备与服务 → 添加集成 → QLoveHome** → 选 dashboard
-6. Dashboard 添加 **网页卡片（iframe）** → 地址：
-   ```
-   /api/lovelace/lovehome/
-   ```
+5. **设置 → 设备与服务 → 添加集成 → QLoveHome**
+   - 如果侧边栏出现 **LoveHome** 入口 → 点进去就是（自动注册了 iframe panel）
+   - 如果没出现 → Dashboard 添加「网页卡片（iframe）」→ 地址：
+     ```
+     /api/lovelace/lovehome/
+     ```
 
 ### 方式二：纯 iframe（最简）
 
@@ -214,15 +220,26 @@ copy lovehome\. custom_components\lovehome\www\ -Recurse
 
 ## ❓ 常见问题
 
-| 现象 | 原因 |
-|---|---|
-| 页面空白 | iframe 地址错 / 文件没传 / `?v=N` 没加 |
-| 全是「—」 | 实体 ID 没换成你的 |
-| 图标有但点不动 | 该设备的 HA 服务不存在，先去开发者工具试跑 |
-| 改了没生效 | `?v=N` 缓存号没加 1 |
-| 手机侧栏不见 | 正常：≤900px 窄屏模式自动隐藏 |
-| 墙体太厚 | `LH.plan.wallW` 默认 3px，改大改小都行 |
-| 待机时间想调 | 设置 → 待机时间面板 |
+| 现象 | 原因 | 解决 |
+|---|---|---|
+| 🆕 **Error setting up entry for lovehome** | v1.0.0 的 panel_custom API 签名在 HA 2024.6+ 不兼容 | 升级到 **v1.0.1**（已修复） |
+| 侧边栏没出现 LoveHome | panel 注册可能失败 | Dashboard 手动加 iframe 卡片 → `/api/lovelace/lovehome/` |
+| 页面空白 | iframe 地址错 / 文件没传 / `?v=N` 没加 | 确认 Dashboard 卡片 URL；确认 `/config/www/lovehome/` 下有 index.html |
+| 全是「—」 | 实体 ID 没换成你的 | 打开开发者工具 → 控制台输 `LH.rooms.map(r=>r.lxs)` 看实际读的是什么 |
+| 图标有但点不动 | 该设备的 HA 服务不存在 | HA → **开发者工具 → 服务** → 搜该设备 → 手动触发试试 |
+| 改了没生效 | 浏览器缓存 | `?v=N` 加 1；还不行 Ctrl+Shift+R 硬刷新 |
+| 手机侧栏不见 | 正常：≤900px 窄屏模式自动隐藏 | |
+| 墙体太厚 | `LH.plan.wallW` 默认 3px | 编辑器里改房间形状后重新生成，或 Console 输 `LH.plan.wallW=10` |
+| 待机时间想调 | 设置面板 | 设置 → 待机时间面板 |
+
+---
+
+## 📝 更新日志
+
+| 版本 | 日期 | 变更 |
+|---|---|---|
+| **v1.0.1** | 2026-10-27 | 🔴 修复 `async_setup_entry` 崩溃（panel_custom API → frontend 内置注册）；manifest iot_class 改为 calculated |
+| **v1.0.0** | 2026-10-27 | 首个正式发布：户型图可视化 + 四季主题 + 编辑器 + 房间标签拖拽 + HACS 集成 |
 
 ---
 

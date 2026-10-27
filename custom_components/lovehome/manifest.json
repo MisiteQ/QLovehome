@@ -3,10 +3,10 @@
   "name": "LoveHome 家庭仪表盘",
   "codeowners": ["@MisiteQ"],
   "config_flow": true,
-  "dependencies": ["http", "panel_custom", "websocket_api"],
+  "dependencies": ["http", "frontend", "websocket_api"],
   "documentation": "https://github.com/MisiteQ/QLovehome",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/MisiteQ/QLovehome/issues",
   "requirements": [],
-  "version": "1.0.0"
+  "version": "1.0.1"
 }

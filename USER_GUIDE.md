@@ -1,8 +1,10 @@
 # QLoveHome · 使用帮助（详细版）
 
-> **适用版本**：v1.0.0  
+> **适用版本**：v1.0.1  
 > **适用人群**：Home Assistant 2024.6+ 用户  
 > **前置条件**：已安装 Home Assistant，有一台平板（门口 / 客厅常亮）
+
+> ⚠️ **v1.0.0 用户请先升级**：v1.0.0 在 HAOS 上 setup 会报错（panel_custom API 不兼容），**v1.0.1 已修复**。卸载旧版 → 重新安装 v1.0.1 即可。
 
 ---
 
@@ -231,17 +233,19 @@ cp custom_components/lovehome/www/lovehome-data.js /config/www/lovehome/
 
 | 现象 | 原因 | 解决 |
 |---|---|---|
+| 🆕 **Error setting up entry for lovehome** | v1.0.0 的 panel_custom API 签名在 HA 2024.6+ 不兼容 | 升级到 **v1.0.1**（已修复，改用 frontend.register_built_in_panel） |
+| 侧边栏没出现 LoveHome | panel 注册可能失败（非致命） | Dashboard 手动加 iframe 卡片 → `/api/lovelace/lovehome/` |
 | 页面空白 | iframe 地址写错 / 文件没传 | 确认 Dashboard 卡片 URL；确认 `/config/www/lovehome/` 下有 index.html |
 | 全是「—」 | 实体 ID 没换成你的 | 打开开发者工具 → 控制台输 `LH.rooms.map(r=>r.lxs)` 看实际读的是什么 |
 | 图标有但点不动 | 该设备的 HA 服务不存在 | HA → **开发者工具 → 服务** → 搜该设备 → 手动触发试试 |
 | 改了没生效 | 浏览器缓存 | `?v=N` 加 1；还不行 Ctrl+Shift+R 硬刷新 |
 | 手机上侧栏不见了 | 正常行为 | ≤900px 窄屏模式，侧栏自动切到顶部下拉 |
-| 墙太厚 / 太薄 | 墙带 pad 值 | 编辑器里改房间形状后重新生成，或临时 Console 输 `LH.plan.wallW=10` |
+| 墙太厚 / 太薄 | 墙带 pad 值 | 编辑器里改房间形状后重新生成，或 Console 输 `LH.plan.wallW=10` |
 | 待机时间想调长 | 设置面板限制 60 分钟 | 可以改 localStorage 里的 `lhStandby`，或手动设置后刷新 |
-| 房间内部有灰色线 | 旧版本 room-shape 透明度不够 | 更新 lovehome.js ≥ v257 |
-| 墙带和房间有缝隙 | unionPolys pad 偏差 | 更新 lovehome.js ≥ v257，内边界直接用房间原始 path |
-| 季节性配色太浓 | room-shape fill 透明度 | 更新 lovehome.css ≥ v255（已调浅 35-45%） |
-| 设置面板导航点击跳转中间 | offsetTop 在多层 div 不准 | 更新 lovehome.js ≥ v265 |
+| 房间内部有灰色线 | 旧版本 room-shape 透明度不够 | 升级到最新版本 |
+| 墙带和房间有缝隙 | unionPolys pad 偏差 | 升级到最新版本 |
+| 季节性配色太浓 | room-shape fill 透明度 | 升级到最新版本（已调浅 35-45%） |
+| 设置面板导航点击跳转中间 | offsetTop 在多层 div 不准 | 升级到最新版本 |
 
 ### 调试工具
 
@@ -259,7 +263,7 @@ localStorage        // 查看本地存储（待机时间、主题、标签位置
 ## 目录结构速查（用户版 zip）
 
 ```
-QLoveHome-v1.0.0/
+QLoveHome-v1.0.1/
 ├── custom_components/lovehome/          # ← 复制到 /config/custom_components/
 │   ├── __init__.py
 │   ├── config_flow.py

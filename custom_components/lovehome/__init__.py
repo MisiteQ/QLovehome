@@ -1,7 +1,7 @@
 """LoveHome 家庭仪表盘集成.
 
 功能:
-- 侧边栏注册 iframe 面板 (panel_custom)
+- 侧边栏注册 iframe 面板 (frontend.async_register_built_in_panel)
 - 托管前端静态文件 (custom_components/lovehome/www)
 - WebSocket API: lovehome/get_config / lovehome/save_config
 - 配置持久化到 /config/lovehome/config.json —— 存在 HA 服务器上,
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import voluptuous as vol
 
-from homeassistant.components import panel_custom, websocket_api
+from homeassistant.components import frontend, websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -54,8 +54,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # 4) 注册侧边栏面板（iframe 方式, 不需要 web component）
     #    直接用 frontend 内置注册, embed_iframe=True 让 HA 加载我们的 HTML
-    from homeassistant.components import frontend
-
     try:
         frontend.async_register_built_in_panel(
             hass,
