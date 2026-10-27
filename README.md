@@ -103,10 +103,23 @@ cp -r custom_components/lovehome/ /config/custom_components/
 
 ## 🔌 接线
 
-所有设备实体、房间坐标、家电清单、概览卡片都在 `gen_lovehome_data.py` 里定义。
+### ⭐ 推荐：编辑器「从 HA 批量导入」（v1.1.0+）
+
+**不用改任何 Python 脚本！**
+
+1. 主界面 → 设置 → 打开编辑器 → **设备 tab**
+2. 点 **🔍 从 HA 批量导入**
+3. 弹窗里按 domain 分组列出你 HA 里所有控制类实体（灯 / 开关 / 空调 / 窗帘 / 风扇 / 影音 / 门锁 / 摄像头...）
+4. 勾选你家的设备 → 点「导入 →」
+5. 系统自动：推断 kind（light 实体 → 灯图标）+ 取 friendly_name 当设备名
+6. 继续配房间归属 + 户型图位置 → 保存
+
+> 已经绑定过的实体会自动灰掉避免重复。超过 30% 设备实体不存在时 tab 头会显示黄色告警。
+
+### 进阶：改 gen_lovehome_data.py（适合大量设备 / 自定义房间名）
 
 ```bash
-# 1. 改 gen_lovehome_data.py 里的实体 ID
+# 1. 改 gen_lovehome_data.py 里的实体 ID 和房间
 # 2. 生成数据层
 python gen_lovehome_data.py
 
@@ -114,7 +127,7 @@ python gen_lovehome_data.py
 # 4. index.html 里的 ?v=N 加 1（浏览器缓存）
 ```
 
-> **实体 ID 对不上不会报错**，只会显示「—」。先按模板跑通看效果，再逐个替换成你的实体。
+> **实体 ID 对不上不会报错**，只会显示「—」。先用批量导入跑通主要设备，特殊实体（概览里的家人/用电）再手改 gen 脚本。
 
 ---
 
@@ -238,6 +251,7 @@ copy lovehome\. custom_components\lovehome\www\ -Recurse
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| **v1.1.0** | 2026-10-27 | ⭐ 新增**编辑器批量导入**：从 HA 实际实体列表勾选创建设备（按 domain 分组、自动推断 kind/名字）；设备 tab 缺失实体告警；接线方式升级为「批量导入优先」 |
 | **v1.0.1** | 2026-10-27 | 🔴 修复 `async_setup_entry` 崩溃（panel_custom API → frontend 内置注册）；manifest iot_class 改为 calculated |
 | **v1.0.0** | 2026-10-27 | 首个正式发布：户型图可视化 + 四季主题 + 编辑器 + 房间标签拖拽 + HACS 集成 |
 

@@ -1,10 +1,10 @@
 # QLoveHome · 使用帮助（详细版）
 
-> **适用版本**：v1.0.1  
+> **适用版本**：v1.1.0  
 > **适用人群**：Home Assistant 2024.6+ 用户  
 > **前置条件**：已安装 Home Assistant，有一台平板（门口 / 客厅常亮）
 
-> ⚠️ **v1.0.0 用户请先升级**：v1.0.0 在 HAOS 上 setup 会报错（panel_custom API 不兼容），**v1.0.1 已修复**。卸载旧版 → 重新安装 v1.0.1 即可。
+> ⚠️ **v1.0.1 用户请升级**：v1.1.0 新增了「从 HA 批量导入实体」功能，**强烈建议升级**，比手动改 Python 脚本省事 10 倍。
 
 ---
 
@@ -16,10 +16,9 @@
    - 方式 B：手动复制（不想装 HACS）
    - 方式 C：纯 iframe（最简，但不能用编辑器）
 3. [接线：把你的设备接进来](#3-接线把你的设备接进来)
-   - 第 1 步：跑通默认数据（先看效果）
-   - 第 2 步：改 gen_lovehome_data.py（接你的实体）
-   - 第 3 步：生成 & 部署
-   - 第 4 步：浏览器缓存
+   - ⭐ 方式 A：编辑器批量导入（推荐，v1.1.0+）
+   - 方式 B：改 gen_lovehome_data.py（进阶）
+   - 实体 ID 怎么找
 4. [换户型](#4-换户型)
 5. [主题与个性化](#5-主题与个性化)
 6. [可视化编辑器](#6-可视化编辑器)
@@ -92,83 +91,85 @@ Dashboard → **网页卡片（iframe）** → 地址：
 
 ## 3. 接线：把你的设备接进来
 
-### 第 1 步：跑通默认数据（先看效果）
+### ⭐ 方式 A：编辑器批量导入（推荐，v1.1.0+）
 
-**什么都不改**，先跑一次：
+**不需要改任何代码！** 点几下就搞定。
+
+#### 前提
+
+- 已通过 HACS 或手动复制完整安装（纯 iframe 方式没有 HA 集成，编辑器功能受限）
+- HA 里已经能看到你的设备（灯、空调、插座这些）
+
+#### 步骤
+
+1. **打开编辑器**：主界面左下角铅笔图标，或设置面板里的「打开编辑器」
+2. **切到设备 tab**
+3. 如果你之前用的模板数据、设备实体全是作者家的：先点 **全选 → 删除选中** 清掉
+4. 点顶部大按钮 **🔍 从 HA 批量导入**
+5. 弹窗里你会看到按 domain 分组的实体列表：
+
+```
+💡 灯光          8 个（已加 3）
+  ☑ 客厅主灯      light.living_main_light        on
+  ☑ 餐厅吊灯      light.living_dining_light       off
+  ☐ 书房台灯      light.study_desk_lamp           on    ← 灰掉：已在面板里
+🔌 开关/插座      5 个
+  ☑ 阳台插座      switch.balcony_plug             off
+❄️ 空调/采暖      2 个
+  ☑ 客厅空调      climate.living_ac               cool
+...
+```
+
+6. 勾选你家的设备 → 点右下角 **导入 →**
+7. 系统自动做三件事：
+   - **推断类型**：`light.xxx` → 灯图标，`climate.xxx` → 空调图标，`switch.xxx` → 插座图标
+   - **取名字**：用 HA 里的 friendly_name（比如"客厅主灯"）
+   - **落位置**：新设备默认位置为空，稍后在编辑器户型图 tab 里拖到对的地方
+8. 保存 → 刷新主界面，设备列表全是你的了 🎉
+
+#### 小贴士
+
+- **还没绑定的实体**（灰色禁用的）表示已经在面板里了，导入时自动跳过避免重复
+- **sensor / binary_sensor / script / scene** 这些不会出现在批量列表里——它们不是"可控制设备"，而是状态 / 自动化
+- 导入后在设备 tab 里**每台设备右侧有实时状态徽章**：✅ on / 🔴 off / ⚠ 离线 / ❌ 不存在
+
+### 方式 B：改 gen_lovehome_data.py（进阶）
+
+适合：设备特别多想一次性生成、或者要自定义房间名 / 概览里的家人 / 用电等特殊实体。
 
 ```bash
+# 1. 改 gen_lovehome_data.py 里的实体 ID 和房间
+# 2. 生成数据层
 python gen_lovehome_data.py
+
+# 3. 把生成的 lovehome-data.js 传到 /config/www/lovehome/
+# 4. index.html 里的 ?v=N 加 1（浏览器缓存）
 ```
 
-它会生成 `lovehome-data.js`，把它复制到 HA：
-- HACS 安装：已经在 `www/` 里了（zip 自带默认数据）
-- 手动安装：`cp lovehome-data.js /config/www/lovehome/`
+### 实体 ID 怎么找？
 
-然后 Dashboard iframe 地址末尾加个 `?v=1`，刷新看效果。**实体 ID 对不上不会报错**，只会显示「—」和灰色图标。
+**HA → 设置 → 实体**：
 
-### 第 2 步：改 gen_lovehome_data.py（接你的实体）
+1. 列表里找到你的设备
+2. 点进去，右边会显示「实体 ID」
+3. 点旁边的**复制图标**就能拿到完整 ID（比如 `light.living_main_light`）
 
-打开 `gen_lovehome_data.py`，找到这些区块：
+**常见 domain 对应表**：
 
-```python
-# === 1. 房间（9 个模板房间，改名字也行） ===
-rooms = [
-    {"id": "living", "name": "客餐厅", "pts": "...", "lxs": "sensor.living_temp", "lxs2": "sensor.living_hum"},
-    ...
-]
-
-# === 2. 家电（每个房间的设备列表） ===
-devgroup("living", [
-    {"name": "餐厅主灯", "eid": "light.living_dining_light"},
-    {"name": "阳台台灯", "eid": "light.living_balcony_lamp", "dimmable": True},
-    ...
-])
-
-# === 3. 概览卡片（家人、用电、安防等） ===
-overview_panels = {
-    "family": [
-        {"name": "我", "eid": "device_tracker.my_phone"},
-        ...
-    ],
-    "electricity": {"eid": "sensor.electricity_daily"},
-    ...
-}
-```
-
-**常见实体 ID 映射**：
-
-| 要接什么 | HA 里找 | 实体 ID 格式 |
+| 你想接 | domain | 实体 ID 格式 |
 |---|---|---|
-| 温湿度 | 设置 → 实体 → 搜 temp | `sensor.xxx_temperature` / `sensor.xxx_humidity` |
-| 灯 | 设置 → 实体 → 搜 light | `light.xxx_light` |
-| 插座 | 设置 → 实体 → 搜 plug | `switch.xxx_plug` 或 `light.xxx_plug` |
-| 空调 | 设置 → 实体 → 搜 climate | `climate.xxx_ac` |
-| 窗帘 | 设置 → 实体 → 搜 cover | `cover.xxx_curtain` |
-| 手机在线 | 设置 → 实体 → 搜 tracker | `device_tracker.xxx_phone` |
-| 用电 | 设置 → 实体 → 搜 energy | `sensor.xxx_energy` |
-| 摄像头 | 设置 → 实体 → 搜 camera | `camera.xxx_doorbell` |
-| 电池 | 设置 → 实体 → 搜 battery | `sensor.xxx_battery_level` |
-
-**不确定？** HA → **设置 → 实体** → 点设备 → 右边「点击复制」图标，就能拿到完整实体 ID。
-
-### 第 3 步：生成 & 部署
-
-```bash
-# Windows
-python gen_lovehome_data.py
-Copy-Item custom_components\lovehome\www\lovehome-data.js "C:\Users\<你>\.homeassistant\www\lovehome\"
-
-# HAOS / Linux
-python3 gen_lovehome_data.py
-cp custom_components/lovehome/www/lovehome-data.js /config/www/lovehome/
-```
-
-### 第 4 步：浏览器缓存
-
-**HA 把前端文件缓得很顽固。** 每次改了 js / css / html：
-
-1. Dashboard iframe 地址末尾的 `?v=N` **必须加 1**（比如 `?v=1` → `?v=2`）
-2. 刷新页面。还不生效就 **Ctrl+Shift+Delete** 清浏览器缓存
+| 灯 / 灯带 | `light` | `light.xxx_light` |
+| 插座 / 开关 | `switch` 或 `light` | `switch.xxx_plug` |
+| 空调 / 地暖 / 新风 | `climate` | `climate.xxx_ac` |
+| 窗帘 / 晾衣架 | `cover` | `cover.xxx_curtain` |
+| 风扇 | `fan` | `fan.xxx_fan` |
+| 影音 / TV / 音箱 | `media_player` | `media_player.xxx_tv` |
+| 门锁 | `lock` | `lock.xxx_lock` |
+| 摄像头 | `camera` | `camera.xxx_doorbell` |
+| 温湿度传感器 | `sensor` | `sensor.xxx_temperature` |
+| 电池电量 | `sensor` | `sensor.xxx_battery_level` |
+| 手机在线 | `device_tracker` | `device_tracker.xxx_phone` |
+| 日用电量 | `sensor` | `sensor.xxx_daily_energy` |
 
 ---
 
@@ -206,6 +207,28 @@ cp custom_components/lovehome/www/lovehome-data.js /config/www/lovehome/
 ## 6. 可视化编辑器
 
 主界面左下角有个编辑图标（铅笔），点进去进入编辑器。
+
+### 🆕 批量导入 HA 实体（v1.1.0+）
+
+设备 tab 顶部有个大按钮 **🔍 从 HA 批量导入**。这是最快的设备绑定方式——不用手敲 entity_id。
+
+- 按 domain 分组列出你 HA 里所有**可控制实体**（灯、开关、空调、窗帘、风扇、影音、门锁、摄像头、热水器...）
+- 每行显示：friendly_name · entity_id · 当前状态
+- 勾选想要的 → 导入后自动推断设备类型 + 取 friendly_name 当名字
+- 已在面板里的实体灰掉禁用，避免重复
+- 传感器 / 自动化 / script / scene 等不进列表（不是可控制设备）
+
+### 设备 tab 实时状态
+
+每台设备右侧会显示一枚小徽章：
+
+| 徽章 | 含义 |
+|---|---|
+| ✅ `on` / `off` | 在线，当前状态 |
+| ⚠ `离线` | 设备 unreachable / unavailable |
+| ⚠ `⚠ 实体不存在` | 这个 entity_id 在你 HA 里找不到 |
+
+超过 30% 的设备实体不存在时，tab 头部会出现黄色告警提示你重新绑定。
 
 ### 快捷键
 
@@ -263,7 +286,7 @@ localStorage        // 查看本地存储（待机时间、主题、标签位置
 ## 目录结构速查（用户版 zip）
 
 ```
-QLoveHome-v1.0.1/
+QLoveHome-v1.1.0/
 ├── custom_components/lovehome/          # ← 复制到 /config/custom_components/
 │   ├── __init__.py
 │   ├── config_flow.py
