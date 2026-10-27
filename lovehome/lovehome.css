@@ -1605,7 +1605,8 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .cgrp-t { font-size: calc(11px * var(--fsk)); letter-spacing: .6px; color: var(--dim-2); margin-bottom: 2px; }
 .cgrp-h { font-size: calc(10.5px * var(--fsk)); line-height: 1.65; color: var(--dim-2); margin: 0 0 4px; }
 .crow { display: flex; align-items: center; gap: 10px; min-height: 31px; font-size: calc(12.5px * var(--fsk)); color: var(--dim); }
-.crow .clab { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crow .clab { flex: 0 0 auto; min-width: 0; white-space: nowrap; overflow: visible; text-overflow: clip; padding-right: 6px; }
+.crow .csw, .crow .cseg { flex: 1 1 auto; min-width: 0; }
 .crow.ro .cval { font-weight: 400; color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
 .crow.ro .cval.dead { color: var(--dim-2); }
 .cseg {

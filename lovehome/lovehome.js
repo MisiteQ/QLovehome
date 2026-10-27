@@ -230,8 +230,28 @@
     fog: '雾', hail: '冰雹', lightning: '雷雨', 'lightning-rainy': '雷阵雨',
     windy: '大风', 'windy-variant': '大风', exceptional: '异常'
   };
-  const HVAC = { off: '已关闭', heat: '制热', cool: '制冷', dry: '除湿', fan_only: '送风', auto: '自动', unavailable: '离线' };
-  const PRESET = { none: '无', comfort: '舒适', eco: '节能', boost: '强劲', sleep: '睡眠', away: '离家', home: '在家', activity: '活动' };
+  const HVAC = { off: '已关闭', heat: '制热', cool: '制冷', dry: '除湿', fan_only: '送风', auto: '自动', unavailable: '离线', idle: '待机' };
+  const PRESET = { none: '无', comfort: '舒适', eco: '节能', boost: '强劲', sleep: '睡眠', away: '离家', home: '在家', activity: '活动', posterior_wash: '臀洗', feminine_wash: '妇洗', air_dry: '烘干', stop: '停止', washing: '冲洗', drying: '烘干' };
+  /* 通用翻译：任何 domain 的 select 选项查不到专用表时，退回这里 */
+  const ALIAS_MAP = {
+    posterior: '臀洗', posterior_wash: '臀洗', 'posterior wash': '臀洗',
+    feminine: '妇洗', feminine_wash: '妇洗', 'feminine wash': '妇洗',
+    bidet: '妇洗', bidet_wash: '妇洗',
+    air_dry: '烘干', 'air dry': '烘干', drying: '烘干',
+    wash: '冲洗', washing: '冲洗', stop: '停止',
+    idle: '待机', standby: '待机',
+    warm: '暖洗', cold: '冷洗',
+    auto: '自动', manual: '手动',
+    on: '开', off: '关', open: '开', closed: '关', close: '关',
+    low: '低', medium: '中', mid: '中', high: '高', max: '最高', min: '最低',
+    boost: '强力', eco: '节能', sleep: '睡眠', quiet: '静音', silent: '静音',
+    comfort: '舒适', economy: '节能', performance: '强力',
+    fan: '送风', cool: '制冷', heat: '制热', dry: '除湿',
+    swing: '摆风', 'swing horizontal': '左右摆风', 'swing vertical': '上下摆风', swing_horizontal: '左右摆风', swing_vertical: '上下摆风',
+    fresh: '新风', smart: '智能',
+    speed_low: '低速', speed_medium: '中速', speed_high: '高速',
+    heating_low: '加热低档', heating_high: '加热高档', '加热低挡': '加热低档', '加热高挡': '加热高档',
+  };
   /* 各家集成给的值大小写不统一：米家/浴霸全小写，美的 midea_ac_lan 是首字母大写
      （Silent / Low / Medium / High / Full / Off），直接查表会全部落空、按钮变英文。
      所以查表统一降一级到小写再试，仍查不到才原样显示。
@@ -1807,7 +1827,16 @@
       const dom = eid.split('.')[0];
       if (SKIP_DOMAINS.has(dom)) return;
       const at = s.attributes || {};
-      const fname = at.friendly_name || eid.split('.')[1] || eid;
+      let fname = at.friendly_name || eid.split('.')[1] || eid;
+      // ★ 去掉设备名前缀：HA 的 friendly_name 常带 "设备名 - " / "设备名·" 开头
+      // （比如 "米家智能浴霸 - 主卫 浴霸灯泡" → "浴霸灯泡"）
+      const devName = (d && d.name) || '';
+      if (devName && fname.startsWith(devName)) {
+        fname = fname.slice(devName.length).replace(/^[\s\-_\.··:：]+/, '');
+      }
+      // 再去掉冗余前缀（比如 "主卫 浴霸" 重复出现两次）
+      const shorter = fname.replace(new RegExp('^' + devName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\-_.·:：]+', 'i'), '');
+      if (shorter.length && shorter.length < fname.length) fname = shorter;
       const label = fname.length > 16 ? fname.slice(0, 15) + '…' : fname;
 
       switch (dom) {
@@ -1981,7 +2010,12 @@
       const at = (s && s.attributes) || {};
       /* 常规 select 用自己的 options；climate 这类要从 preset_modes / hvac_modes 里取（it.opts_attr） */
       const opts = at.options || (it.opts_attr ? at[it.opts_attr] : null) || it.opts || [];
-      const lbl = (o) => (it.map && it.map[o]) || (it.short ? String(o).replace(/开关$/, '') : o);
+      const lbl = (o) => {
+        if (it.map && it.map[o] != null) return it.map[o];
+        if (it.domain === 'climate') return tr(HVAC, o);
+        if (it.domain === 'fan') return tr(FAN, o);
+        return tr(ALIAS_MAP, String(o).toLowerCase());
+      };
       return `<div class="crow">${lab}<div class="cseg" ${A}>` +
         opts.map((o) => `<button type="button" data-opt="${o}">${lbl(o)}</button>`).join('') +
         '</div></div>';
