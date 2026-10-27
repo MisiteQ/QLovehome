@@ -1806,120 +1806,209 @@
   /* ── 底部大按钮 power button 适用的 domain ── */
   const MAIN_SWITCHABLE = ['switch', 'light', 'cover', 'fan', 'media_player', 'water_heater', 'humidifier', 'lock', 'vacuum', 'valve', 'remote'];
 
-  /* ── 设备模板库：按设备名关键字匹配，生成预配置 ctl ── */
+  /* ── 设备模板库：按设备名关键字匹配，生成预配置 ctl
+     ★ 所有模板严格参照用户提供的米家/中控面板设计图 ── */
   const DEVICE_TEMPLATES = {
+    /* ✅ 浴霸（参考"主卫浴霸"设计图：顶部大状态 + 预设 tab + 运行模式 seg + 暖风/吹风/换气 sw + 加热档位 + 延时关机）*/
     '浴霸|bathroom_heater': (d, eids) => ({
-      always: true, sub: '暖风 · 模式 · 延时', open: '设置', echo: [{ e: d.entity }],
+      always: true, sub: '取暖 · 吹风 · 换气 · 延时', open: '设置', echo: [{ e: d.entity }],
       groups: [
-        { t: '暖风', items: [
-          { k: 'sw', label: '暖风高挡', e: eids.find((e) => /high/i.test(e)) || '' },
-          { k: 'sw', label: '暖风低挡', e: eids.find((e) => /low/i.test(e)) || '' },
+        { t: '运行模式', hint: '自动交给浴霸预设程序，关机则整机停', items: [
+          { k: 'seg', label: '运行模式', e: d.entity, domain: 'select' },
+          { k: 'seg', label: '预设程序', e: eids.find((e) => /preset|program/i.test(e)) || d.entity },
+          { k: 'btn', label: '停止工作', e: d.entity, svc: 'turn_off', text: '停止', dom: 'switch' },
+        ] },
+        { t: '暖风 · 吹风 · 换气', items: [
+          { k: 'sw', label: '暖风', e: eids.find((e) => /heat|warm/i.test(e)) || '' },
+          { k: 'sw', label: '吹风', e: eids.find((e) => /blow|fan/i.test(e) && !/speed/i.test(e)) || '' },
+          { k: 'sw', label: '换气', e: eids.find((e) => /vent|exchange/i.test(e)) || '' },
+          { k: 'seg', label: '加热档位', e: eids.find((e) => /level|gear/i.test(e)) || d.entity },
         ].filter((x) => x.e) },
-        { t: '模式选择', items: [
-          { k: 'seg', label: '预设模式', e: eids.find((e) => /mode|preset/i.test(e)) || d.entity },
+        { t: '关机延时', hint: '洗完澡让它再吹一会儿把湿气排掉', items: [
+          { k: 'sw', label: '延时关机', e: eids.find((e) => /delay/i.test(e)) || '' },
+          { k: 'num', label: '延时时长', e: eids.find((e) => /delay_time|duration/i.test(e)) || '', unit: ' 分钟', min: 0, max: 120 },
         ].filter((x) => x.e) },
         { t: '照明', items: [
           { k: 'sw', label: '浴霸灯泡', e: eids.find((e) => /light|bulb/i.test(e)) || '' },
         ].filter((x) => x.e) },
       ].filter((g) => g.items.length)
     }),
-    '洗衣机|wash|laundry': (d, eids) => ({
-      always: true, sub: '电源 · 程序', open: '设置', echo: [{ e: d.entity }],
-      groups: [
-        { t: '电源', items: [
-          { k: 'sw', label: '通断', e: eids.find((e) => e.startsWith('switch')) || d.entity },
-        ] },
-        { t: '程序控制', items: [
-          { k: 'btn', label: '开始', e: eids.find((e) => /start/i.test(e)) || '', text: '开始' },
-          { k: 'btn', label: '暂停', e: eids.find((e) => /pause/i.test(e)) || '', text: '暂停' },
-        ].filter((x) => x.e) },
-        { t: '状态', items: [
-          { k: 'ro', label: '剩余时间', e: eids.find((e) => /remaining|time_left/i.test(e)) || '', unit: '' },
-          { k: 'ro', label: '运行状态', e: eids.find((e) => /status|state/i.test(e)) || '', unit: '' },
-        ].filter((x) => x.e) },
-      ].filter((g) => g.items.length)
-    }),
-    '空气炸|airfry|air_fryer': (d, eids) => ({
-      always: true, sub: '温度 · 时间 · 烹饪', open: '设置', echo: [{ e: d.entity }],
-      groups: [
-        { t: '烹饪控制', items: [
-          { k: 'btn', label: '开始烹饪', e: eids.find((e) => /start/i.test(e)) || '', text: '开始' },
-          { k: 'btn', label: '暂停', e: eids.find((e) => /pause/i.test(e)) || '', text: '暂停' },
-          { k: 'btn', label: '停止烹饪', e: eids.find((e) => /stop/i.test(e)) || '', text: '停止' },
-        ].filter((x) => x.e) },
-        { t: '参数', items: [
-          { k: 'num', label: '烹饪温度', e: eids.find((e) => /temp/i.test(e)) || '', unit: '°C' },
-          { k: 'num', label: '烹饪时间', e: eids.find((e) => /time|duration/i.test(e)) || '', unit: ' 分钟' },
-        ].filter((x) => x.e) },
-        { t: '状态', items: [
-          { k: 'ro', label: '工作状态', e: eids.find((e) => /status/i.test(e)) || '', unit: '' },
-          { k: 'ro', label: '剩余时间', e: eids.find((e) => /remaining/i.test(e)) || '', unit: '' },
-        ].filter((x) => x.e) },
-      ].filter((g) => g.items.length)
-    }),
-    '饮水机|净饮|water_dispenser|purifier': (d, eids) => ({
-      always: true, sub: '出水 · 水质 · 滤芯', open: '设置', echo: [{ e: d.entity }],
-      groups: [
-        { t: '出水', items: [
-          { k: 'ro', label: '出水温度', e: eids.find((e) => /temp/i.test(e)) || '', unit: '°C' },
-          { k: 'ro', label: '当前水温', e: eids.find((e) => /current/i.test(e)) || '', unit: '°C' },
-          { k: 'ro', label: '工作状态', e: eids.find((e) => /status/i.test(e)) || '', unit: '' },
-        ].filter((x) => x.e) },
-        { t: '水质', items: [
-          { k: 'ro', label: '进水 TDS', e: eids.find((e) => /tds_in|tds_inlet/i.test(e)) || '', unit: ' ppm' },
-          { k: 'ro', label: '出水 TDS', e: eids.find((e) => /tds_out|tds_pure/i.test(e)) || '', unit: ' ppm' },
-        ].filter((x) => x.e) },
-        { t: '滤芯 · 维护', items: [
-          { k: 'ro', label: '剩余寿命', e: eids.find((e) => /filter|cartridge/i.test(e)) || '', unit: '%' },
-          { k: 'sw', label: 'UV 杀菌', e: eids.find((e) => /uv/i.test(e)) || '' },
-        ].filter((x) => x.e) },
-      ].filter((g) => g.items.length)
-    }),
-    '中控|central|smart_panel|hub': (d, eids) => ({
-      always: true, sub: '屏幕 · 音箱', open: '设置', echo: [{ e: d.entity }],
-      groups: [
-        { t: '屏幕', items: [
-          { k: 'sw', label: '亮屏', e: eids.find((e) => /screen|display/i.test(e)) || '' },
-          { k: 'num', label: '亮度', e: eids.find((e) => /brightness/i.test(e)) || '', unit: '%' },
-        ].filter((x) => x.e) },
-        { t: '音箱', items: [
-          { k: 'num', label: '音量', e: eids.find((e) => /volume/i.test(e)) || '', unit: '%' },
-        ].filter((x) => x.e) },
-        { t: '继电器通道', items: eids.filter((e) => /relay|switch_\d|channel/i.test(e) && e.startsWith('switch')).map((e) => ({ k: 'sw', label: e.split('.')[1].replace(/_/g, ' '), e })) },
-      ].filter((g) => g.items.length)
-    }),
-    '热水器|water_heater': (d, eids) => ({
-      always: true, sub: '温度 · 燃气', open: '设置', echo: [{ e: d.entity }],
-      groups: [
-        { t: '热水器', items: [
-          { k: 'sw', label: '通断', e: d.entity },
-          { k: 'num', label: '目标水温', e: d.entity, aval: 'temperature', unit: '°C' },
-          { k: 'ro', label: '当前状态', e: eids.find((e) => /status/i.test(e)) || d.entity, unit: '' },
-        ] },
-      ]
-    }),
+
+    /* ✅ 马桶盖（参考马桶盖设计图：大状态 + 开机按钮 + 水温/座温/水流/风速 四合一 seg + 喷头位置 + 个性化/节能/夜灯/除臭 + 滤芯）*/
     '马桶|toilet|bidet': (d, eids) => ({
       always: true, sub: '冲洗 · 座圈 · 滤芯', open: '设置', echo: [{ e: d.entity }],
       groups: [
         { t: '运行', items: [
-          { k: 'sw', label: '总开关', e: d.entity },
-          { k: 'seg', label: '工作模式', e: eids.find((e) => /mode/i.test(e)) || d.entity },
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'ro', label: '水温', e: eids.find((e) => /water_temp/i.test(e)) || '', unit: '°C' },
+          { k: 'ro', label: '座温', e: eids.find((e) => /seat_temp/i.test(e)) || '', unit: '°C' },
+        ].filter((x) => x.e) },
+        { t: '水温 · 座温 · 水流 · 风速', items: [
+          { k: 'seg', label: '水温档', e: eids.find((e) => /water_temp/i.test(e)) || d.entity },
+          { k: 'seg', label: '座温档', e: eids.find((e) => /seat_temp/i.test(e)) || '' },
+          { k: 'seg', label: '水流大小', e: eids.find((e) => /flow|stream/i.test(e)) || '' },
+          { k: 'seg', label: '风速', e: eids.find((e) => /dry|fan/i.test(e)) || '' },
+        ].filter((x) => x.e) },
+        { t: '喷头位置', items: [
+          { k: 'seg', label: '喷嘴位置', e: eids.find((e) => /nozzle|position/i.test(e)) || d.entity },
         ] },
-        { t: '冲洗', items: [
-          { k: 'num', label: '冲洗强度', e: eids.find((e) => /strength|wash/i.test(e)) || '', unit: ' 档' },
-        ].filter((x) => x.e) },
-        { t: '座圈 · 除臭', items: [
-          { k: 'sw', label: '座圈加热', e: eids.find((e) => /heat|seat/i.test(e)) || '' },
-          { k: 'sw', label: '除臭', e: eids.find((e) => /deodor/i.test(e)) || '' },
-        ].filter((x) => x.e) },
-        { t: '夜灯', items: [
-          { k: 'sw', label: '夜灯', e: eids.find((e) => /night|light/i.test(e)) || '' },
+        { t: '个性化设置', items: [
+          { k: 'ro', label: '个性化模式', e: eids.find((e) => /custom|personal/i.test(e)) || d.entity, unit: '' },
+          { k: 'ro', label: '节能模式', e: eids.find((e) => /eco/i.test(e)) || '', unit: '' },
+          { k: 'sw', label: '自动夜灯', e: eids.find((e) => /night|light/i.test(e)) || '' },
+          { k: 'sw', label: '提示音', e: eids.find((e) => /sound|beep|voice/i.test(e)) || '' },
+          { k: 'sw', label: '自动除臭', e: eids.find((e) => /deodor/i.test(e)) || '' },
         ].filter((x) => x.e) },
         { t: '滤芯', items: [
           { k: 'ro', label: '剩余寿命', e: eids.find((e) => /filter/i.test(e)) || '', unit: '%' },
         ].filter((x) => x.e) },
       ].filter((g) => g.items.length)
     }),
+
+    /* ✅ 智能门锁（参考门锁设计图：只读为主，门状态/开锁方式/事件记录 三大块 + 🔒大状态头）*/
+    '门锁|lock|smart_lock|door_lock|cadiz|kaadas|aqara.*lock|roci': (d, eids) => ({
+      always: true, sub: '门锁 · 电量 · 告警', open: '查看', echo: [{ e: d.entity }],
+      groups: [
+        { t: '门状态', items: [
+          { k: 'ro', label: '锁体状态', e: d.entity, unit: '' },
+          { k: 'ro', label: '电量', e: eids.find((e) => /battery/i.test(e)) || '', unit: '%' },
+          { k: 'ro', label: '布防', e: eids.find((e) => /armed|security/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '门磁状态', e: eids.find((e) => /door|contact/i.test(e) && e.startsWith('binary_sensor')) || '', unit: '' },
+        ].filter((x) => x.e) },
+        { t: '开锁方式 · 连接', items: [
+          { k: 'ro', label: '连接方式', e: d.entity, unit: '', attr: 'connected' },
+          { k: 'ro', label: '钥匙 ID', e: eids.find((e) => /key|rfid/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+        { t: '事件记录 · 告警', items: [
+          { k: 'ro', label: '最后一次操作', e: eids.find((e) => /last|record/i.test(e)) || d.entity, unit: '' },
+          { k: 'ro', label: '锁事件', e: eids.find((e) => /event|notify/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '门铃状态', e: eids.find((e) => /doorbell|ring/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '低电量告警', e: eids.find((e) => /low.*bat|alert/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '被撬告警', e: eids.find((e) => /pry|tamper/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+        { t: '应急操作', items: [
+          { k: 'btn', label: '解锁', e: d.entity, svc: 'unlock', text: '🔓 远程解锁', dom: 'lock' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+
+    /* ✅ 饮水机（参考饮水机设计图：出水/水质/滤芯/维护 四大块）*/
+    '饮水机|净饮|water_dispenser|purifier': (d, eids) => ({
+      always: true, sub: '出水 · 水质 · 滤芯', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '出水', items: [
+          { k: 'ro', label: '工作状态', e: d.entity, unit: '' },
+          { k: 'num', label: '出水温度设定', e: d.entity, unit: '°C' },
+          { k: 'ro', label: '当前水温', e: eids.find((e) => /current.*temp|water_temp/i.test(e)) || '', unit: '°C' },
+        ].filter((x) => x.e) },
+        { t: '水质', items: [
+          { k: 'ro', label: '进水 TDS', e: eids.find((e) => /tds_in|tds_inlet/i.test(e)) || '', unit: ' ppm' },
+          { k: 'ro', label: '出水 TDS', e: eids.find((e) => /tds_out|tds_pure/i.test(e)) || '', unit: ' ppm' },
+        ].filter((x) => x.e) },
+        { t: '滤芯 · 寿命', items: [
+          { k: 'ro', label: '剩余寿命', e: eids.find((e) => /filter|cartridge/i.test(e)) || '', unit: '%' },
+          { k: 'ro', label: '剩余流量', e: eids.find((e) => /flow|volume/i.test(e)) || '', unit: ' L' },
+          { k: 'ro', label: '已用流量', e: eids.find((e) => /used|total.*flow/i.test(e)) || '', unit: ' L' },
+          { k: 'ro', label: '已用时长', e: eids.find((e) => /duration|hours/i.test(e)) || '', unit: ' 小时' },
+        ].filter((x) => x.e) },
+        { t: '维护 · 安全', items: [
+          { k: 'sw', label: 'UV 杀菌', e: eids.find((e) => /uv/i.test(e)) || '' },
+          { k: 'sw', label: '童锁', e: eids.find((e) => /child.*lock|lock/i.test(e)) || '' },
+          { k: 'ro', label: '故障状态', e: eids.find((e) => /fault|error/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+
+    /* ✅ 燃气热水器（参考热水器设计图：通断/目标水温/燃烧状态 三大块）*/
+    '热水器|water_heater': (d, eids) => ({
+      always: true, sub: '燃气 · 温度', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '热水器', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'num', label: '目标水温设定', e: d.entity, unit: '°C', min: 35, max: 65, aval: 'temperature', svc: 'water_heater.set_temperature' },
+          { k: 'ro', label: '当前状态', e: d.entity, unit: '' },
+        ] },
+        { t: '燃烧状态', items: [
+          { k: 'ro', label: '燃烧状态', e: eids.find((e) => /burn|flame/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '进水温度', e: eids.find((e) => /inlet.*temp|cold.*water/i.test(e)) || '', unit: '°C' },
+          { k: 'ro', label: '设定水温', e: d.entity, unit: '°C', attr: 'temperature' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+
+    /* ✅ 空气炸锅（参考空气炸锅设计图：烹饪/参数/状态 三大块）*/
+    '空气炸|airfry|air_fryer': (d, eids) => ({
+      always: true, sub: '温度 · 时间 · 烹饪', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '烹饪控制', hint: '先把温度和时间设好再开点开始；暂停只是保温等待', items: [
+          { k: 'btn', label: '开始烹饪', e: d.entity, svc: 'turn_on', text: '▶ 开始', dom: 'switch' },
+          { k: 'btn', label: '暂停', e: eids.find((e) => /pause/i.test(e)) || d.entity, svc: 'turn_off', text: '⏸ 暂停', dom: 'switch' },
+          { k: 'btn', label: '停止烹饪', e: d.entity, svc: 'turn_off', text: '⏹ 停止', dom: 'switch' },
+        ] },
+        { t: '参数', items: [
+          { k: 'num', label: '烹饪温度', e: eids.find((e) => /temp/i.test(e)) || '', unit: '°C', min: 40, max: 230 },
+          { k: 'num', label: '烹饪时间', e: eids.find((e) => /time|duration/i.test(e)) || '', unit: ' 分钟', min: 1, max: 120 },
+        ].filter((x) => x.e) },
+        { t: '状态', items: [
+          { k: 'ro', label: '工作状态', e: d.entity, unit: '' },
+          { k: 'ro', label: '剩余时间', e: eids.find((e) => /remaining/i.test(e)) || '', unit: ' 分钟' },
+          { k: 'ro', label: '故障状态', e: eids.find((e) => /fault|error/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '上次完成', e: eids.find((e) => /last|done/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+
+    /* ✅ 中控面板（参考中控面板设计图：屏幕/音箱/三路按键 三大块）*/
+    '中控|central|smart_panel|hub': (d, eids) => ({
+      always: true, sub: '屏幕 · 音箱 · 三路按键', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '屏幕', items: [
+          { k: 'seg', label: '屏幕状态', e: eids.find((e) => /screen|display/i.test(e)) || d.entity },
+          { k: 'num', label: '亮度', e: eids.find((e) => /brightness/i.test(e)) || '', unit: '%', min: 0, max: 100 },
+          { k: 'sw', label: '自动息屏', e: eids.find((e) => /auto.*off|sleep/i.test(e)) || '' },
+          { k: 'sw', label: '自动亮度', e: eids.find((e) => /auto.*bright/i.test(e)) || '' },
+        ].filter((x) => x.e) },
+        { t: '音箱', items: [
+          { k: 'num', label: '音量', e: eids.find((e) => /volume/i.test(e)) || '', unit: '%', min: 0, max: 100 },
+          { k: 'sw', label: '麦克风禁麦', e: eids.find((e) => /mute|mic/i.test(e)) || '' },
+          { k: 'sw', label: '睡眠模式', e: eids.find((e) => /sleep/i.test(e)) || '' },
+          { k: 'btn', label: '唤醒小爱', e: d.entity, svc: 'turn_on', text: '🎙 唤醒', dom: 'switch' },
+        ].filter((x) => x.e) },
+        { t: '三路继电器按键', items: [
+          { k: 'ro', label: '左键', e: eids.find((e) => /left/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '中键', e: eids.find((e) => /middle|center/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '右键', e: eids.find((e) => /right/i.test(e)) || '', unit: '' },
+          // 三个继电器通道独立开关
+          ...eids.filter((e) => /relay|channel|switch_\d/i.test(e) && e.startsWith('switch')).map((e, i) => ({
+            k: 'sw', label: `继电器${i + 1}`, e
+          })),
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+
+    /* ✅ 洗衣机（参考米家洗衣机 App 设计）*/
+    '洗衣机|wash|laundry': (d, eids) => ({
+      always: true, sub: '程序 · 状态 · 剩余时间', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '程序控制', items: [
+          { k: 'sw', label: '通断', e: eids.find((e) => e.startsWith('switch')) || d.entity },
+          { k: 'seg', label: '程序选择', e: eids.find((e) => /program|mode/i.test(e)) || d.entity },
+          { k: 'btn', label: '开始', e: d.entity, svc: 'turn_on', text: '▶ 开始', dom: 'switch' },
+          { k: 'btn', label: '暂停', e: eids.find((e) => /pause/i.test(e)) || '', svc: 'turn_off', text: '⏸ 暂停', dom: 'switch' },
+        ].filter((x) => x.e) },
+        { t: '参数', items: [
+          { k: 'seg', label: '温度', e: eids.find((e) => /temp/i.test(e)) || '' },
+          { k: 'seg', label: '转速', e: eids.find((e) => /spin|speed/i.test(e)) || '' },
+          { k: 'seg', label: '用水量', e: eids.find((e) => /water|level/i.test(e)) || '' },
+        ].filter((x) => x.e) },
+        { t: '状态', items: [
+          { k: 'ro', label: '剩余时间', e: eids.find((e) => /remaining|time_left/i.test(e)) || '', unit: ' 分钟' },
+          { k: 'ro', label: '运行状态', e: eids.find((e) => /status|state/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '故障代码', e: eids.find((e) => /fault|error/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* 旧饮水机/中控/热水器/马桶已在上面重写，这里只保留未重写的 */
     '插排|插座|plug|outlet|power_strip': (d, eids) => {
       const hasPower = eids.some((e) => /power|energy|kwh|current|voltage/i.test(e));
       const groups = [
@@ -1940,26 +2029,6 @@
       }
       return { always: true, sub: hasPower ? '通断 · 计量' : '通断', open: '设置', echo: [{ e: d.entity }], groups };
     },
-    /* ── 门锁（米家 / 凯迪仕 / 鹿客 / Aqara 等） ── */
-    '门锁|lock|smart_lock|door_lock|cadiz|kaadas|aqara.*lock|roci': (d, eids) => ({
-      always: true, sub: '门锁 · 电量 · 告警', open: '设置', echo: [{ e: d.entity }],
-      groups: [
-        { t: '门锁控制', items: [
-          { k: 'btn', label: '解锁', e: d.entity, svc: 'unlock', text: '🔓 解锁', dom: 'lock' },
-          { k: 'btn', label: '上锁', e: d.entity, svc: 'lock', text: '🔒 上锁', dom: 'lock' },
-          { k: 'btn', label: '开门', e: d.entity, svc: 'open', text: '🚪 开门', dom: 'lock' },
-        ] },
-        { t: '门锁状态', items: [
-          { k: 'ro', label: '电池电量', e: eids.find((e) => /battery/i.test(e)) || d.entity, unit: '%', attr: 'battery_level' },
-          { k: 'ro', label: '门状态', e: eids.find((e) => /door|contact|open/i.test(e) && e.startsWith('binary_sensor')) || '', unit: '' },
-          { k: 'ro', label: '上一次开锁', e: eids.find((e) => /last|trigg/i.test(e)) || '', unit: '' },
-        ].filter((x) => x.e) },
-        { t: '告警', items: [
-          { k: 'ro', label: '被撬告警', e: eids.find((e) => /pry|tamper/i.test(e)) || '', unit: '' },
-          { k: 'ro', label: '逗留告警', e: eids.find((e) => /lingering|stuck/i.test(e)) || '', unit: '' },
-        ].filter((x) => x.e) },
-      ].filter((g) => g.items.length)
-    }),
     /* ── 扫地机 / 扫拖一体 / 吸尘器 ── */
     '扫地|vacuum|robot.*vac|roborock|dreame|ilife|xiaomi.*vac|sweeper|扫拖': (d, eids) => ({
       always: true, sub: '清扫 · 回充 · 状态', open: '设置', echo: [{ e: d.entity }],
