@@ -2353,8 +2353,20 @@
                 .filter((x) => x.device_id === myEnt.device_id && !x.disabled_by && !x.hidden_by)
                 .map((x) => x.entity_id);
               if (siblings.length > 1) {
-                d.entities = siblings;
-                toastHint('同设备还有 ' + (siblings.length - 1) + ' 个实体，已一起关联', 2000);
+                // ★ 让用户选：整台设备所有实体 or 仅当前这个
+                const deviceName = (s.attributes && s.attributes.friendly_name) || eid;
+                const isAll = confirm(
+                  `检测到这个实体属于一台设备（共 ${siblings.length} 个实体）。\n\n` +
+                  `点击【确定】→ 添加整台设备（所有功能都会在控制面板里出现）\n` +
+                  `点击【取消】→ 仅添加当前这一个实体（只显示/控制这一个）\n\n` +
+                  `当前实体：${deviceName}`);
+                if (isAll) {
+                  d.entities = siblings;
+                  toastHint('✓ 已添加整台设备（' + siblings.length + ' 个实体）', 2200);
+                } else {
+                  d.entities = [eid];
+                  toastHint('仅添加当前实体（' + siblings.length + ' 个兄弟实体已忽略）', 2200);
+                }
               }
             }
           } catch (e) { /* 静默退化 */ }
