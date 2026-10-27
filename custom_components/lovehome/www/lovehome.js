@@ -5498,6 +5498,48 @@
   }
 
   let tick = null;
+  /* ★ 老设备实体迁移：给没有 entities 数组的设备补全 device_id + 兄弟实体
+     升级到新版后自动跑一次，跑完写回 localStorage，让旧户型图也能匹配 DEVICE_TEMPLATES */
+  function migrateDeviceEntities() {
+    const hass = window.hass;
+    if (!hass || typeof hass.callWS !== 'function') return;  // WS 还没连上，跳过
+    const devs = window.LH && window.LH.devices;
+    if (!Array.isArray(devs) || !devs.length) return;
+
+    // 找出所有需要迁移的设备
+    const needMigrate = devs.filter((d) => d && d.entity && !(d.entities && d.entities.length) && !d.ctl);
+    if (!needMigrate.length) return;  // 全部迁移过了
+
+    // 异步查 WS
+    hass.callWS({ type: 'config/entity_registry/list' }).then((ents) => {
+      if (!Array.isArray(ents)) return;
+      let changed = false;
+      for (const d of needMigrate) {
+        const myEnt = ents.find((x) => x.entity_id === d.entity);
+        if (myEnt && myEnt.device_id) {
+          d.device_id = myEnt.device_id;
+          const siblings = ents
+            .filter((x) => x.device_id === myEnt.device_id && !x.disabled_by && !x.hidden_by)
+            .map((x) => x.entity_id);
+          d.entities = siblings.length > 1 ? siblings : [d.entity];
+          changed = true;
+        }
+      }
+      if (changed) {
+        // 写回 localStorage（编辑器下次打开也能看到）
+        try {
+          const raw = localStorage.getItem('lovehome.config.v1');
+          if (raw) {
+            const cfg = JSON.parse(raw);
+            cfg.devices = devs;
+            localStorage.setItem('lovehome.config.v1', JSON.stringify(cfg));
+            console.log('[LoveHome] ✓ 迁移了', needMigrate.filter((d) => d.entities && d.entities.length).length, '台老设备（补全 entities 数组）');
+          }
+        } catch (e) {}
+      }
+    }).catch(() => { /* WS 暂时不可用，静默跳过 */ });
+  }
+
   function boot() {
     // ★ 关键：先读用户保存的配置覆盖模板
     // 编辑器 persist() 保存到 localStorage('lovehome.config.v1')
@@ -5511,6 +5553,11 @@
         for (const k of SECTIONS) if (saved[k] != null) window.LH[k] = saved[k];
       }
     } catch (e) { console.warn('[LoveHome] 读取保存配置失败', e); }
+
+    // ★ 迁移：老设备没有 entities 数组的，异步补全 device_id + 兄弟实体
+    //    （让升级到新版后，旧户型图里的设备也能匹配 DEVICE_TEMPLATES 走专业面板）
+    try { migrateDeviceEntities(); } catch (e) {}
+
     buildPlan();
     buildSide();
     /* 刷新后默认收起房间面板，右列显示「天气 · 用电」——
