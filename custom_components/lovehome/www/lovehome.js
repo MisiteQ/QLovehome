@@ -1876,7 +1876,10 @@
 
     // ★ 如果这台设备有多个兄弟实体，自动构建 ctl 走复合面板渲染
     //    （让批量导入的马桶能像模板马桶一样显示所有功能）
-    if (!d.ctl && d.entities && d.entities.length > 1) {
+    //    但！有专用 CTL 处理器的 domain（climate/light/cover 等）不能抢——
+    //    它们有自己专业的面板（温度滑块/模式分段等），autoBuildComposite 会把面板搞砸
+    const HAS_DEDICATED_CTL = !!CTL[dom];
+    if (!d.ctl && !HAS_DEDICATED_CTL && d.entities && d.entities.length > 1) {
       d.ctl = autoBuildComposite(d);
       if (d.ctl) { openComposite(d); return; }
     }
