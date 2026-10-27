@@ -30,19 +30,17 @@
 
 ## 📸 截图
 
-> 把你的截图放在 `screenshots/` 目录，替换下面的占位链接
-
-| 首页（深色） | 首页（浅色） |
+| 首页（浅色主题） | 概览面板 |
 |:---:|:---:|
-| ![home-dark](screenshots/home-dark.png) | ![home-light](screenshots/home-light.png) |
+| ![home-light](screenshots/home-light.png) | ![overview](screenshots/overview.png) |
 
 | 编辑器 · 户型绘制 | 设置面板 |
 |:---:|:---:|
 | ![editor](screenshots/editor.png) | ![settings](screenshots/settings.png) |
 
-| 屏保 | 房间详情 |
+| 房间详情（空调中控） | |
 |:---:|:---:|
-| ![screensaver](screenshots/screensaver.png) | ![room-detail](screenshots/room-detail.png) |
+| ![room-detail](screenshots/room-detail.png) | |
 
 ---
 
@@ -132,32 +130,44 @@ python gen_lovehome_data.py
 
 ```
 QLovehome/
-├── custom_components/lovehome/     # HA 自定义集成
-│   ├── __init__.py                  # integration 注册
-│   ├── config_flow.py               # HA 配置向导
-│   ├── manifest.json                # 集成元信息
-│   ├── strings.json                 # 配置文案
-│   ├── translations/                # 多语言（en / zh-Hans）
-│   └── www/                         # 前端静态文件（部署用）
+├── .github/workflows/validate.yaml   # CI: HACS + Python + JS 语法校验
+├── .gitignore                        # Git 忽略规则
+├── .hacsignore                       # HACS 下载包过滤
 │
-├── lovehome/                        # 前端源码（开发用）
-│   ├── index.html                   # 页面骨架
-│   ├── lovehome.js                  # 主界面 + 几何算法
-│   ├── lovehome-editor.js           # 可视化编辑器
-│   ├── lovehome.css                 # 全部样式 + 四季主题
-│   ├── lovehome-data.js             # 数据层（生成）
-│   └── QLovehome.png                # 项目图标
+├── custom_components/lovehome/       # ⭐ HA 自定义集成
+│   ├── __init__.py                    # integration 注册
+│   ├── config_flow.py                 # HA 配置向导
+│   ├── const.py                       # 常量
+│   ├── manifest.json                  # 集成元信息（version / domain）
+│   ├── strings.json                   # 配置向导文案
+│   ├── translations/                  # 多语言（en / zh-Hans）
+│   └── www/                           # 前端静态文件（HACS 部署用）
+│       ├── index.html
+│       ├── lovehome.js                # 主界面 + 几何算法
+│       ├── lovehome-editor.js         # 可视化编辑器
+│       ├── lovehome.css               # 全部样式 + 四季主题
+│       ├── lovehome-data.js           # 数据层（gen 脚本生成）
+│       ├── QLovehome.png              # 项目图标
+│       └── assets/                    # 背景图（bg-day / bg-night / plan-real）
 │
-├── gen_lovehome_data.py             # ⭐ 数据生成器（主要改这个）
-├── extract_rooms.py                 # 多边形提取工具
-├── calib_real.py                    # 现实风底板校准
-├── rooms_poly.json                  # 房间多边形（几何源头）
-├── photo_outline.json               # 户型外轮廓
-├── templates.yaml                   # HA template 示例
-├── hacs.json                        # HACS 自动发现
-├── info.md                          # HACS 展示页
-├── LICENSE                          # MIT
-└── README.md                        # 本文件
+├── lovehome/                          # 前端源码（开发用，同步到 www/）
+│
+├── gen_lovehome_data.py               # ⭐ 数据生成器（改实体 ID 跑这个）
+├── extract_rooms.py                   # 从标注图提取房间多边形
+├── calib_real.py                      # 现实风底板校准
+├── calib_real.json                    # 校准输出
+├── rooms_poly.json                    # 房间多边形坐标（唯一几何源头）
+├── photo_outline.json                 # 户型外轮廓
+├── missing_ents.json                  # 未接入设备清单（运行时读取）
+├── templates.yaml                     # HA template sensor 示例
+├── optional-patches/
+│   └── patch_midea5.py                # 美的 AC LAN 兼容补丁（可选）
+│
+├── QLovehome.png                      # 项目图标（根目录）
+├── hacs.json                          # HACS 自动发现配置
+├── info.md                            # HACS 安装后展示页
+├── LICENSE                            # MIT
+└── README.md                          # 本文件
 ```
 
 ---
