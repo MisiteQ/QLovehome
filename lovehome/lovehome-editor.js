@@ -1712,17 +1712,28 @@
    * ══════════════════════════════════════════════════════ */
   function buildDevicesTab() {
     const wrap = el('div', 'lh-ed-list-wrap');
+    const existing = (window.LH.devices || []);
+    const states = haStates();
+    let missing = 0, total = 0;
+    existing.forEach((d) => { if (d.entity) { total++; if (states && !states[d.entity]) missing++; } });
+    const hasHA = !!states;
+    const warn = (!hasHA) ? '<span class="hint" style="color:var(--amber-2)">⚠ 未连接到 HA，实体选择器不可用</span>'
+                : (total > 0 && missing / total > 0.3)
+                  ? '<span class="hint" style="color:var(--amber-2)">⚠ ' + missing + '/' + total + ' 台设备实体不存在，建议重新绑定</span>' : '';
+
     wrap.innerHTML = '<div class="lh-ed-list-head">' +
-      '<b>设备列表</b><span class="hint">共 ' + (window.LH.devices || []).length + ' 台</span>' +
+      '<b>设备列表</b><span class="hint">共 ' + existing.length + ' 台</span>' + warn +
       '<div class="lh-ed-list-actions">' +
+        (hasHA ? '<button class="lh-ed-btn primary" id="lhEdBulkImport" type="button" title="从 HA 实际实体中勾选批量添加">🔍 从 HA 批量导入</button>' : '') +
         '<label class="lh-ed-selall"><input type="checkbox" id="lhEdSelAll">全选</label>' +
         '<button class="lh-ed-btn danger" id="lhEdDelSel" type="button" disabled>删除选中 (0)</button>' +
-        '<button class="lh-ed-btn primary" id="lhEdDevAdd" type="button">+ 添加设备</button>' +
+        '<button class="lh-ed-btn" id="lhEdDevAdd" type="button">+ 单台添加</button>' +
       '</div></div><div class="lh-ed-list" id="lhEdDevList"></div>';
 
     const list = $('#lhEdDevList', wrap);
-    (window.LH.devices || []).forEach((d) => list.appendChild(buildDevRow(d)));
+    existing.forEach((d) => list.appendChild(buildDevRow(d)));
 
+    if (hasHA) $('#lhEdBulkImport', wrap).addEventListener('click', openBulkImport);
     $('#lhEdDevAdd', wrap).addEventListener('click', () => openDeviceEditor(null));
     setupMultiSelect('devices', wrap.querySelector('.lh-ed-list-head'), list, deleteDevices);
 
@@ -1780,6 +1791,145 @@
     multiSel.devices.clear();
     markDirty(); rerenderEditorTab();
     document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+  }
+
+  /* ══════════════════════════════════════════════════════
+   * 批量从 HA 实体导入：按 domain 分组列实体，用户勾选 → 自动创建设备
+   * ══════════════════════════════════════════════════════ */
+  function openBulkImport() {
+    const states = haStates();
+    if (!states) { alert('未连接到 Home Assistant'); return; }
+
+    // 已经绑定过的实体 → 跳过（避免重复）
+    const existingEntities = new Set((window.LH.devices || []).map((d) => d.entity).filter(Boolean));
+
+    // 收集 HA 里的实体，按 domain 分组；过滤掉 binary_sensor / sensor 等纯状态的
+    const SKIP_DOMAINS = new Set(['binary_sensor', 'sensor', 'history_stats', 'input_boolean',
+                                  'input_select', 'input_number', 'input_datetime', 'script', 'scene',
+                                  'automation', 'group', 'person', 'zone', 'device_tracker', 'sun',
+                                  'timer', 'counter', 'proximity']);
+    const groups = {};  // domain -> [{eid, name, state, domain}]
+    for (const eid of Object.keys(states)) {
+      const domain = eid.split('.')[0];
+      if (SKIP_DOMAINS.has(domain)) continue;
+      const s = states[eid];
+      const fname = (s.attributes && s.attributes.friendly_name) || eid;
+      if (!groups[domain]) groups[domain] = [];
+      groups[domain].push({
+        eid, name: fname, state: s.state, domain,
+        already: existingEntities.has(eid)
+      });
+    }
+    // domain 中文名 + 排序（常用的放前面）
+    const DOMAIN_LABEL = {
+      light: '💡 灯光', switch: '🔌 开关/插座', climate: '❄️ 空调/采暖',
+      cover: '🪟 窗帘', fan: '🌀 风扇', media_player: '📺 影音',
+      lock: '🔒 门锁', camera: '📷 摄像头', water_heater: '🚿 热水器',
+      humidifier: '💨 加湿器', vacuum: '🤖 扫地机', siren: '🚨 警报器'
+    };
+    const DOMAIN_ORDER = ['light', 'switch', 'climate', 'cover', 'fan', 'media_player',
+                          'lock', 'camera', 'water_heater', 'humidifier', 'vacuum', 'siren'];
+
+    // 构建弹窗
+    const dlg = el('div', 'lh-ed-dialog bulk-import');
+    const existingCount = Object.values(groups).reduce((s, arr) => s + arr.filter((e) => e.already).length, 0);
+    const totalAvailable = Object.values(groups).reduce((s, arr) => s + arr.filter((e) => !e.already).length, 0);
+
+    let body = `<div class="lh-ed-dialog-mask"></div>
+      <div class="lh-ed-dialog-body" style="max-width:780px;max-height:82vh;display:flex;flex-direction:column">
+        <div class="lh-ed-dialog-head"><b>🔍 从 Home Assistant 批量导入设备</b>
+          <button class="lh-ed-dialog-close" type="button">×</button></div>
+        <div style="padding:8px 16px;color:var(--s3);font-size:13px;border-bottom:1px solid var(--bd2)">
+          HA 中可用控制类实体 <b style="color:var(--amber-2)">${totalAvailable}</b> 个，已在面板里 <b>${existingCount}</b> 个。勾选要添加的 → 点「导入」自动创建设备
+        </div>`;
+
+    DOMAIN_ORDER.forEach((dom) => {
+      const list = groups[dom];
+      if (!list || !list.length) return;
+      const alreadyCnt = list.filter((e) => e.already).length;
+      body += `<div class="bulk-group">
+        <div class="bulk-group-head">
+          <b>${DOMAIN_LABEL[dom] || dom}</b>
+          <span class="hint">${list.length} 个${alreadyCnt ? '（已加 ' + alreadyCnt + '）' : ''}</span>
+        </div><div class="bulk-group-list">`;
+      list.forEach((e) => {
+        body += `<label class="bulk-item${e.already ? ' already' : ''}">
+          <input type="checkbox" data-eid="${e.eid}" ${e.already ? 'disabled title="已在面板中"' : ''}>
+          <span class="bulk-name">${e.name}</span>
+          <code class="bulk-id">${e.eid}</code>
+          <span class="bulk-state">${e.state}</span>
+        </label>`;
+      });
+      body += '</div></div>';
+    });
+
+    // 不在预定义列表里但存在的 domain 也列出来
+    Object.keys(groups).forEach((dom) => {
+      if (DOMAIN_ORDER.indexOf(dom) >= 0) return;
+      const list = groups[dom];
+      if (!list || !list.length) return;
+      body += `<div class="bulk-group">
+        <div class="bulk-group-head"><b>${dom}</b><span class="hint">${list.length} 个</span></div>
+        <div class="bulk-group-list">`;
+      list.forEach((e) => {
+        body += `<label class="bulk-item${e.already ? ' already' : ''}">
+          <input type="checkbox" data-eid="${e.eid}" ${e.already ? 'disabled' : ''}>
+          <span class="bulk-name">${e.name}</span>
+          <code class="bulk-id">${e.eid}</code>
+          <span class="bulk-state">${e.state}</span>
+        </label>`;
+      });
+      body += '</div></div>';
+    });
+
+    body += `<div class="lh-ed-dialog-foot" style="border-top:1px solid var(--bd2);padding:10px 16px">
+      <button class="lh-ed-btn" id="bulkCancel" type="button">取消</button>
+      <span class="hint" id="bulkCount" style="margin-left:12px">已勾选 0 个</span>
+      <button class="lh-ed-btn primary" id="bulkDo" type="button" style="margin-left:auto">导入 →</button>
+    </div></div>`;
+    dlg.innerHTML = body;
+    document.body.appendChild(dlg);
+
+    const closeIt = () => dlg.classList.remove('open');
+    setTimeout(() => dlg.classList.add('open'), 10);
+    dlg.querySelector('.lh-ed-dialog-close').onclick = closeIt;
+    dlg.querySelector('.lh-ed-dialog-mask').onclick = closeIt;
+    dlg.querySelector('#bulkCancel').onclick = closeIt;
+
+    const countEl = dlg.querySelector('#bulkCount');
+    const refreshCount = () => {
+      const n = dlg.querySelectorAll('input[type=checkbox]:checked').length;
+      countEl.textContent = '已勾选 ' + n + ' 个';
+    };
+    dlg.addEventListener('change', refreshCount);
+
+    dlg.querySelector('#bulkDo').onclick = () => {
+      const cbs = dlg.querySelectorAll('input[type=checkbox]:checked');
+      if (!cbs.length) { closeIt(); return; }
+      // 把面板里现有设备清空？不，保留，追加新的
+      const existing = window.LH.devices || [];
+      cbs.forEach((cb) => {
+        const eid = cb.dataset.eid;
+        const domain = eid.split('.')[0];
+        const kind = DOMAIN_KIND[domain] || 'appliance';
+        const s = states[eid];
+        const fname = (s.attributes && s.attributes.friendly_name) || eid;
+        existing.push({
+          id: genId('d'),
+          name: fname,
+          kind: kind,
+          entity: eid,
+          room: '',
+          x: null, y: null
+        });
+      });
+      window.LH.devices = existing;
+      markDirty();
+      closeIt();
+      rerenderEditorTab();
+      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      toastHint('已导入 ' + cbs.length + ' 台设备，继续在编辑器里配置房间/位置');
+    };
   }
 
   function buildDevRow(d) {
