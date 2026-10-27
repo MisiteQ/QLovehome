@@ -1839,51 +1839,54 @@
   async function openBulkImport() {
     const states = haStates();
     if (!states) { alert('未连接到 Home Assistant'); return; }
-    const h = window.parent && window.parent.document
-      ? window.parent.document.querySelector('home-assistant') : null;
-    const canWS = h && h.hass && typeof h.hass.callWS === 'function';
+    const hass = haHass();  // ★ 用 editor 自己的函数，比内联写更健壮
 
-    // 已经绑定过的实体 → 标记为 already
+    // 已经绑定过的主实体 → 标记为 already
     const existingEntities = new Set((window.LH.devices || []).map((d) => d.entity).filter(Boolean));
 
-    const SKIP_DOMAINS = new Set(['history_stats', 'input_boolean',
-                                  'input_select', 'input_number', 'input_datetime', 'script', 'scene',
-                                  'automation', 'group', 'person', 'zone', 'sun',
-                                  'timer', 'counter', 'proximity', 'update', 'calendar',
-                                  'schedule', 'todo', 'shopping_list', 'image_processing',
-                                  'stt', 'tts', 'assist_satellite', 'conversation', 'notify']);
+    // 只排除真正没用的系统 domain
+    const SKIP_DOMAINS = new Set(['history_stats', 'input_boolean', 'input_select',
+                                  'input_number', 'input_datetime', 'input_text',
+                                  'script', 'scene', 'automation', 'group', 'person',
+                                  'zone', 'sun', 'timer', 'counter', 'proximity',
+                                  'update', 'calendar', 'schedule', 'todo',
+                                  'shopping_list', 'image_processing', 'stt', 'tts',
+                                  'assist_satellite', 'conversation', 'notify',
+                                  'logbook', 'persistent_notification', 'recorder']);
 
-    // 优先从 HA API 拿完整的 entity_registry（有 device_id），不然从 states 退化
-    let entityList = [], deviceList = [];
-    if (canWS) {
+    // ★ 优先从 HA WS API 拿完整的 entity_registry（有 device_id）和 device_registry
+    //    WS 失败就只靠 states 退化，不影响界面显示
+    let entityList = [], deviceList = [], wsOk = false;
+    if (hass && typeof hass.callWS === 'function') {
       try {
         const [ents, devs] = await Promise.all([
-          h.hass.callWS({ type: 'config/entity_registry/list' }),
-          h.hass.callWS({ type: 'config/device_registry/list' })
+          hass.callWS({ type: 'config/entity_registry/list' }),
+          hass.callWS({ type: 'config/device_registry/list' })
         ]);
         entityList = ents || [];
         deviceList = devs || [];
-      } catch (e) { /* 退化 */ }
+        wsOk = true;
+      } catch (e) { wsOk = false; /* 退化到 states */ }
     }
 
     const DEV_MAP = {};  // device_id -> device object
     deviceList.forEach((d) => { DEV_MAP[d.id] = d; });
 
-    // 收集所有实体（优先用 entity_registry，没有就从 states 拿）
+    // ★ 收集所有实体：entity_registry 里有就算数（不管 states 有没有）
+    //   HA 刚注册的实体 states 可能还没推送过来，但注册表一定有
     const entities = [];
     entityList.forEach((e) => {
       if (e.disabled_by || e.hidden_by) return;
       const domain = e.entity_id.split('.')[0];
       if (SKIP_DOMAINS.has(domain)) return;
       const s = states[e.entity_id];
-      if (!s) return;  // 已经不存在了
-      const fname = (e.name || s.attributes && s.attributes.friendly_name) || e.entity_id;
+      const fname = (e.name || (s && s.attributes && s.attributes.friendly_name)) || e.entity_id;
       entities.push({
         eid: e.entity_id, domain,
-        name: fname, state: s.state,
+        name: fname,
+        state: (s && s.state) || 'unknown',
         device_id: e.device_id || null,
-        platform: e.platform || '',
-        already: existingEntities.has(e.entity_id)
+        platform: e.platform || ''
       });
     });
     // 补充：entity_registry 里没有的（比如 MQTT 自动发现的某些）
@@ -1895,8 +1898,7 @@
       const fname = (s.attributes && s.attributes.friendly_name) || eid;
       entities.push({
         eid, domain, name: fname, state: s.state,
-        device_id: null, platform: '',
-        already: existingEntities.has(eid)
+        device_id: null, platform: ''
       });
     }
 
@@ -1917,53 +1919,80 @@
       'valve': '水阀', 'device_tracker': '定位', 'lawn_mower': '割草机'
     };
 
-    // 把实体按 device 聚合
-    const deviceGroups = {};  // key=device_id 或 'no-dev-<platform>'
-    const noDev = [];  // 没有 device_id 的散实体
+    // ★ 把实体按 device 聚合（有 device_id 就算一组，不管 device_registry 能不能查到）
+    const deviceGroups = {};  // key=device_id
+    const noDev = [];  // 没有 device_id 的散实体（MQTT 自动发现等）
     entities.forEach((e) => {
-      if (e.device_id && DEV_MAP[e.device_id]) {
+      if (e.device_id) {
         const dv = DEV_MAP[e.device_id];
         const key = e.device_id;
         if (!deviceGroups[key]) {
-          const name = dv.name_by_user || dv.name || e.name.split(' ')[0] || '未知设备';
-          const platform = dv.manufacturer || dv.model || e.platform || '';
+          const name = dv
+            ? (dv.name_by_user || dv.name || e.name.split(' ')[0] || '未知设备')
+            : (e.name.split(' ')[0] || '未知设备');
+          const platform = dv
+            ? (dv.manufacturer || dv.model || e.platform || '')
+            : (e.platform || '');
           deviceGroups[key] = {
-            key, name, platform, model: dv.model || '',
+            key, name, platform, model: dv ? (dv.model || '') : '',
             ents: [],
-            already: false,
-            domains: new Set()
+            eids: [],      // ★ 存所有 entity_id 数组，bulkDo 直接用
+            mainEntEid: '',  // 主实体 eid（MAIN_ENTITY_PRIORITY 选出来的）
+            mainEntKind: '',
+            domains: new Set(),
+            alreadyEids: new Set()
           };
         }
         deviceGroups[key].ents.push(e);
+        deviceGroups[key].eids.push(e.eid);
         deviceGroups[key].domains.add(e.domain);
-        if (e.already) deviceGroups[key].already = true;
+        if (existingEntities.has(e.eid)) deviceGroups[key].alreadyEids.add(e.eid);
       } else {
         noDev.push(e);
       }
     });
 
-    // 按平台 / 数量排序：多实体设备放前面
+    // ★ 选每台设备的「主实体」—— bulkDo 时作为面板 d.entity 存储
+    const MAIN_ENTITY_PRIORITY = ['climate', 'light', 'media_player', 'lock', 'camera',
+                                   'cover', 'fan', 'switch', 'water_heater', 'vacuum',
+                                   'humidifier', 'siren', 'remote', 'valve', 'select',
+                                   'button', 'number', 'sensor', 'binary_sensor'];
+    Object.values(deviceGroups).forEach((dev) => {
+      for (const dom of MAIN_ENTITY_PRIORITY) {
+        const hit = dev.ents.find((e) => e.domain === dom);
+        if (hit) { dev.mainEntEid = hit.eid; dev.mainEntKind = DOMAIN_KIND[hit.domain] || 'appliance'; return; }
+      }
+      // 退化：第一个实体
+      dev.mainEntEid = dev.ents[0].eid;
+      dev.mainEntKind = DOMAIN_KIND[dev.ents[0].domain] || 'appliance';
+    });
+
+    // 按实体数排序：多实体设备放前面
     const devArr = Object.values(deviceGroups).sort((a, b) => b.ents.length - a.ents.length);
 
-    // 构建弹窗 HTML
+    // ★ 诊断信息——让用户一眼看到数据状态
+    const diagWs = wsOk ? '✅ WS' : '⚠ 仅 states（有些设备可能读不全）';
+    const diagLine = `📡 数据来源：${diagWs} · 注册表 ${entityList.length} 实体 / ${deviceList.length} 台设备 · 共识别 <b>${devArr.length}</b> 台设备 · <b>${noDev.length}</b> 个散实体 · 已有 <b style="color:var(--amber-2)">${existingEntities.size}</b> 实体在面板中`;
+
+    // 构建弹窗 HTML —— ★ 简化版：只有设备级 checkbox + 展开看实体详情
     const dlg = el('div', 'lh-ed-dialog bulk-import');
     let html = `<div class="lh-ed-dialog-mask"></div>
       <div class="lh-ed-dialog-body" style="max-width:860px;max-height:85vh;display:flex;flex-direction:column">
         <div class="lh-ed-dialog-head"><b>🔍 从 Home Assistant 批量导入</b>
           <button class="lh-ed-dialog-close" type="button">×</button></div>
-        <div style="padding:8px 16px;color:var(--s3);font-size:13px;border-bottom:1px solid var(--bd2)">
-          按物理设备分组 · 勾整台设备（一次加全部实体）或单独勾某个实体 · 已有 <b style="color:var(--amber-2)">${existingEntities.size}</b> 个实体在面板中
+        <div style="padding:6px 16px;color:var(--s3);font-size:12px;border-bottom:1px solid var(--bd2);background:var(--bg2,#f7f9fc)">
+          ${diagLine}
         </div>
         <div style="padding:6px 12px;border-bottom:1px solid var(--bd2);display:flex;gap:12px;font-size:12px">
-          <input type="text" id="bulkSearch" placeholder="🔎 搜索设备名 / 实体 / domain..." style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--bd2);background:var(--bg2, #f7f9fc);color:inherit">
-          <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="bulkHideAlready"> 隐藏已在面板</label>
+          <input type="text" id="bulkSearch" placeholder="🔎 搜索设备名 / domain..." style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--bd2);background:var(--bg2, #f7f9fc);color:inherit">
+          <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="bulkHideAlready"> 隐藏已全部接入</label>
         </div>
         <div class="bulk-dev-list" id="bulkDevList" style="flex:1;overflow-y:auto;padding:8px">`;
 
-    // 渲染每个设备
+    // ★ 设备卡片：只有设备级 checkbox，点击展开看有哪些实体（纯展示不可单独勾）
     devArr.forEach((dev) => {
-      const allAlready = dev.ents.every((e) => e.already);
-      const someAlready = dev.ents.some((e) => e.already);
+      const allAlready = dev.ents.every((e) => existingEntities.has(e.eid));
+      const someAlready = dev.ents.some((e) => existingEntities.has(e.eid));
       const doms = Array.from(dev.domains);
       const kind = DEV_KIND[dev.platform] || doms.map((d) => DEV_KIND[d]).filter(Boolean)[0] || '';
       html += `<div class="bulk-dev-card${allAlready ? ' all-already' : ''}" data-dev="${dev.key}">
@@ -1975,30 +2004,33 @@
           <span class="bulk-dev-meta">
             ${kind ? '<span class="bulk-dev-kind">' + kind + '</span>' : ''}
             <span class="bulk-dev-model">${dev.model || dev.platform || ''}</span>
-            <span class="bulk-dev-count">${dev.ents.length} 实体${someAlready ? ' · 已有部分接入' : ''}</span>
+            <span class="bulk-dev-count">${dev.ents.length} 实体 · 主: <code>${dev.mainEntEid}</code>${someAlready ? ' · 部分已接入' : ''}</span>
           </span>
+          <button class="bulk-dev-toggle" type="button" title="展开/收起实体">▸</button>
         </div>
-        <div class="bulk-dev-ents">`;
+        <div class="bulk-dev-ents" style="display:none">`;
       dev.ents.forEach((e) => {
-        html += `<label class="bulk-item${e.already ? ' already' : ''}">
-          <input type="checkbox" class="bulk-ent-check" data-dev="${dev.key}" data-eid="${e.eid}" ${e.already ? 'disabled title="已在面板中"' : ''}>
+        const already = existingEntities.has(e.eid);
+        html += `<div class="bulk-item${already ? ' already' : ''}">
           <span class="bulk-name">${e.name}</span>
-          <code class="bulk-id">${e.domain}</code>
+          <code class="bulk-id">${e.eid}</code>
           <span class="bulk-state ${e.state === 'on' ? 'on' : (e.state === 'unavailable' ? 'unavailable' : '')}">${e.state}</span>
-        </label>`;
+        </div>`;
       });
       html += '</div></div>';
     });
 
-    // 没有 device_id 的散实体
+    // 没有 device_id 的散实体（仍然给 checkbox，因为没归属设备）
     if (noDev.length) {
       html += `<div class="bulk-dev-card"><div class="bulk-dev-head">
         <b class="bulk-dev-name">🔬 无归属设备的散实体</b>
         <span class="bulk-dev-meta"><span class="bulk-dev-count">${noDev.length} 个</span></span>
-      </div><div class="bulk-dev-ents">`;
+        <button class="bulk-dev-toggle" type="button">▸</button>
+      </div><div class="bulk-dev-ents" style="display:none">`;
       noDev.forEach((e) => {
-        html += `<label class="bulk-item${e.already ? ' already' : ''}">
-          <input type="checkbox" class="bulk-ent-check" data-eid="${e.eid}" ${e.already ? 'disabled' : ''}>
+        const already = existingEntities.has(e.eid);
+        html += `<label class="bulk-item${already ? ' already' : ''}">
+          <input type="checkbox" class="bulk-ent-check" data-eid="${e.eid}" ${already ? 'disabled' : ''}>
           <span class="bulk-name">${e.name}</span>
           <code class="bulk-id">${e.eid}</code>
           <span class="bulk-state">${e.state}</span>
@@ -2010,7 +2042,7 @@
     html += `</div>
       <div class="lh-ed-dialog-foot" style="border-top:1px solid var(--bd2);padding:10px 16px">
         <button class="lh-ed-btn" id="bulkCancel" type="button">取消</button>
-        <span class="hint" id="bulkCount" style="margin-left:12px">已勾选 0 个</span>
+        <span class="hint" id="bulkCount" style="margin-left:12px">已勾选 0 台设备</span>
         <button class="lh-ed-btn primary" id="bulkDo" type="button" style="margin-left:auto">导入 →</button>
       </div></div>`;
     dlg.innerHTML = html;
@@ -2022,18 +2054,18 @@
     dlg.querySelector('.lh-ed-dialog-mask').onclick = closeIt;
     dlg.querySelector('#bulkCancel').onclick = closeIt;
 
-    // 设备级 checkbox 联动（勾整台 → 全勾实体）
-    dlg.querySelectorAll('.bulk-dev-check').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const key = cb.dataset.dev;
-        dlg.querySelectorAll(`.bulk-ent-check[data-dev="${key}"]:not(:disabled)`).forEach((ec) => {
-          ec.checked = cb.checked;
-        });
-        refreshCount();
+    // 展开/收起实体详情
+    dlg.querySelectorAll('.bulk-dev-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const entsDiv = btn.closest('.bulk-dev-card').querySelector('.bulk-dev-ents');
+        if (!entsDiv) return;
+        const hidden = entsDiv.style.display === 'none';
+        entsDiv.style.display = hidden ? '' : 'none';
+        btn.textContent = hidden ? '▾' : '▸';
       });
     });
 
-    // 搜索 + 隐藏已接入
+    // 搜索 + 隐藏已全部接入
     const searchInp = dlg.querySelector('#bulkSearch');
     const hideAlready = dlg.querySelector('#bulkHideAlready');
     const cards = dlg.querySelectorAll('.bulk-dev-card');
@@ -2055,40 +2087,74 @@
     hideAlready.addEventListener('change', applyFilter);
 
     function refreshCount() {
-      const n = dlg.querySelectorAll('.bulk-ent-check:checked:not(.bulk-dev-check)').length
-        + dlg.querySelectorAll('.bulk-ent-check.bulk-dev-check:checked').length;
-      const realChecked = dlg.querySelectorAll('.bulk-ent-check:checked').length;
-      dlg.querySelector('#bulkCount').textContent = '已勾选 ' + realChecked + ' 个实体';
+      const devCount = dlg.querySelectorAll('.bulk-dev-check:checked').length;
+      const entCount = dlg.querySelectorAll('.bulk-ent-check:checked').length;
+      dlg.querySelector('#bulkCount').textContent =
+        devCount + ' 台设备' + (entCount ? ' + ' + entCount + ' 散实体' : '');
     }
     dlg.addEventListener('change', refreshCount);
 
     dlg.querySelector('#bulkDo').onclick = () => {
-      const checked = dlg.querySelectorAll('.bulk-ent-check:checked');
-      const toAdd = [];
-      checked.forEach((cb) => {
-        if (!cb.dataset.eid) return;
-        toAdd.push(cb.dataset.eid);
+      // ★ 简化：只收集设备级 checkbox + 散实体 checkbox
+      const checkedDevs = new Set();   // device_id → 整台被勾
+      const checkedEnts = new Set();   // eid → 散实体被勾
+      dlg.querySelectorAll('.bulk-dev-check:checked').forEach((cb) => {
+        if (cb.dataset.dev) checkedDevs.add(cb.dataset.dev);
       });
-      if (!toAdd.length) { closeIt(); return; }
+      dlg.querySelectorAll('.bulk-ent-check:checked').forEach((cb) => {
+        if (cb.dataset.eid) checkedEnts.add(cb.dataset.eid);
+      });
+      if (!checkedDevs.size && !checkedEnts.size) { closeIt(); return; }
+
       const existing = window.LH.devices || [];
       const plan = window.LH.plan || { w: 620, h: 692 };
       const cx = Math.round(plan.w / 2), cy = Math.round(plan.h / 2);
-      // 去重
-      const seen = new Set();
-      toAdd.forEach((eid) => {
-        if (seen.has(eid)) return;
-        seen.add(eid);
-        const domain = eid.split('.')[0];
-        const kind = DOMAIN_KIND[domain] || 'appliance';
-        const s = states[eid];
-        const fname = (s.attributes && s.attributes.friendly_name) || eid;
-        const idx = existing.length + seen.size - 1;
+
+      const toCreate = [];
+      const seenMainEids = new Set();
+
+      // 1) 被勾的设备 → 整台进来
+      devArr.forEach((dev) => {
+        if (!checkedDevs.has(dev.key)) return;
+        if (dev.ents.every((e) => existingEntities.has(e.eid))) return;
+        if (seenMainEids.has(dev.mainEntEid)) return;
+        seenMainEids.add(dev.mainEntEid);
+        toCreate.push({
+          name: dev.name,
+          kind: dev.mainEntKind,
+          entity_id: dev.mainEntEid,
+          entities: dev.eids.slice(),  // ★ 整台设备所有实体 eid 数组
+          device_id: dev.key
+        });
+      });
+
+      // 2) 被勾的散实体 → 单独建条目
+      noDev.forEach((e) => {
+        if (!checkedEnts.has(e.eid)) return;
+        if (existingEntities.has(e.eid)) return;
+        if (seenMainEids.has(e.eid)) return;
+        seenMainEids.add(e.eid);
+        toCreate.push({
+          name: e.name,
+          kind: DOMAIN_KIND[e.domain] || 'appliance',
+          entity_id: e.eid,
+          entities: [e.eid],  // ★ 单元素数组
+          device_id: null
+        });
+      });
+
+      if (!toCreate.length) { closeIt(); return; }
+
+      toCreate.forEach((c, i) => {
+        const idx = existing.length + i;
         const angle = (idx % 8) * (Math.PI / 4);
         const radius = 30 + Math.floor(idx / 8) * 30;
         const x = Math.max(30, Math.min(plan.w - 30, Math.round(cx + Math.cos(angle) * radius)));
         const y = Math.max(30, Math.min(plan.h - 30, Math.round(cy + Math.sin(angle) * radius)));
         existing.push({
-          id: genId('d'), name: fname, kind, entity: eid,
+          id: genId('d'), name: c.name, kind: c.kind,
+          entity: c.entity_id,         // 主实体（控制/显示用）
+          entities: c.entities,         // ★ 同设备所有实体（数组）
           room: '', x, y
         });
       });
@@ -2097,7 +2163,7 @@
       closeIt();
       rerenderEditorTab();
       document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
-      toastHint('已导入 ' + seen.size + ' 台设备（默认位置画布中心，编辑器里拖到对的房间）');
+      toastHint('已导入 ' + toCreate.length + ' 台设备 · 编辑器里拖到对应房间');
     };
   }
 
@@ -2257,7 +2323,7 @@
     const pickerOpts = {
       domains: (KIND_DOMAINS[d.kind] || []).slice(),
       placeholder: '从 HA 实体列表选择，或手动输入 entity_id',
-      onChange: (eid) => {
+      onChange: async (eid) => {
         if (entPicker.updateStatus) entPicker.updateStatus();
         const states = haStates();
         const s = states && states[eid];
@@ -2267,11 +2333,31 @@
           d.kind = DOMAIN_KIND[domain];
           $('#dKind', form).value = d.kind;
           $$('.kind-ico', form).forEach((b) => b.classList.toggle('on', b.dataset.kind === d.kind));
-          // 推荐列表跟着新类型换（opts.domains 是引用，改它才生效）
           pickerOpts.domains = (KIND_DOMAINS[d.kind] || []).slice();
         }
         const fname = s.attributes && s.attributes.friendly_name;
         if (fname && isNew) $('#dName', form).value = fname;
+
+        // ★ 自动关联：查 entity_registry 拿同 device_id 的所有实体
+        d.device_id = null;
+        d.entities = [eid];  // 默认只有自己
+        const hass2 = haHass();
+        if (hass2 && typeof hass2.callWS === 'function') {
+          try {
+            const ents = await hass2.callWS({ type: 'config/entity_registry/list' });
+            const myEnt = (ents || []).find((x) => x.entity_id === eid);
+            if (myEnt && myEnt.device_id) {
+              d.device_id = myEnt.device_id;
+              const siblings = (ents || [])
+                .filter((x) => x.device_id === myEnt.device_id && !x.disabled_by && !x.hidden_by)
+                .map((x) => x.entity_id);
+              if (siblings.length > 1) {
+                d.entities = siblings;
+                toastHint('同设备还有 ' + (siblings.length - 1) + ' 个实体，已一起关联', 2000);
+              }
+            }
+          } catch (e) { /* 静默退化 */ }
+        }
       }
     };
     const entPicker = createEntityPicker($('#dEntity', form), pickerOpts);
@@ -2883,7 +2969,7 @@
 
   /* ── 工具：提示气泡 ──────────────────────────────── */
   let toastEl = null;
-  function toastHint(msg) {
+  function toastHint(msg, dur) {
     if (!toastEl) {
       toastEl = el('div', 'lh-ed-toast');
       document.body.appendChild(toastEl);
@@ -2891,7 +2977,7 @@
     toastEl.textContent = msg;
     toastEl.classList.add('show');
     clearTimeout(toastHint._t);
-    toastHint._t = setTimeout(() => toastEl.classList.remove('show'), 2200);
+    toastHint._t = setTimeout(() => toastEl.classList.remove('show'), dur || 2200);
   }
 
   function genId(prefix, collection) {
