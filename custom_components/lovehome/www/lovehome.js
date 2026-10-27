@@ -2064,6 +2064,182 @@
         ].filter((x) => x.e) },
       ].filter((g) => g.items.length)
     }),
+    /* ── 电饭煲 / 电饭锅 / 电压力锅 ── */
+    '电饭|饭煲|电饭堡|pressure_cooker|rice_cooker|电压力锅|炖锅': (d, eids) => ({
+      always: true, sub: '烹饪 · 模式 · 保温', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '烹饪控制', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'btn', label: '开始煮饭', e: d.entity, svc: 'turn_on', text: '🍚 开始', dom: 'switch' },
+          { k: 'btn', label: '取消/保温', e: d.entity, svc: 'turn_off', text: '⏹ 取消', dom: 'switch' },
+        ] },
+        { t: '模式选择', items: [
+          { k: 'seg', label: '烹饪模式', e: eids.find((e) => /mode|program/i.test(e)) || d.entity },
+          { k: 'seg', label: '口感', e: eids.find((e) => /taste|texture/i.test(e)) || '' },
+        ].filter((x) => x.e) },
+        { t: '状态', items: [
+          { k: 'ro', label: '当前状态', e: d.entity, unit: '' },
+          { k: 'ro', label: '剩余时间', e: eids.find((e) => /remaining|time_left/i.test(e)) || '', unit: ' 分钟' },
+          { k: 'ro', label: '内锅温度', e: eids.find((e) => /temp/i.test(e)) || '', unit: '°C' },
+          { k: 'ro', label: '当前口感', e: eids.find((e) => /keep_warm|warm/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 烤箱 / 蒸箱 / 空气炸锅已在上面 ── */
+    '烤箱|oven|蒸箱|steamer|roaster|kettle|电水壶': (d, eids) => ({
+      always: true, sub: '温度 · 时间 · 模式', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '烹饪控制', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'num', label: '设定温度', e: d.entity, unit: '°C' },
+          { k: 'num', label: '烹饪时间', e: d.entity, unit: ' 分钟' },
+        ] },
+        { t: '模式', items: [
+          { k: 'seg', label: '烹饪模式', e: d.entity },
+        ] },
+        { t: '状态', items: [
+          { k: 'ro', label: '当前温度', e: eids.find((e) => /temp/i.test(e)) || d.entity, unit: '°C' },
+          { k: 'ro', label: '剩余时间', e: eids.find((e) => /remaining/i.test(e)) || '', unit: ' 分钟' },
+          { k: 'ro', label: '工作状态', e: eids.find((e) => /status/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 冰箱 ── */
+    '冰箱|refrigerator|fridge|freezer|冷柜': (d, eids) => ({
+      always: true, sub: '温度 · 模式 · 告警', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '冷藏室', items: [
+          { k: 'num', label: '冷藏温度', e: eids.find((e) => /fridge|refrigerator|cool/i.test(e)) || d.entity, unit: '°C', aval: 'temperature', min: 2, max: 10 },
+        ] },
+        { t: '冷冻室', items: [
+          { k: 'num', label: '冷冻温度', e: eids.find((e) => /freeze|freezer/i.test(e)) || '', unit: '°C', min: -24, max: -12 },
+        ].filter((x) => x.e) },
+        { t: '模式', items: [
+          { k: 'seg', label: '运行模式', e: eids.find((e) => /mode|smart|eco/i.test(e)) || d.entity },
+        ] },
+        { t: '告警', items: [
+          { k: 'ro', label: '门未关告警', e: eids.find((e) => /door/i.test(e)) || '', unit: '' },
+          { k: 'ro', label: '高温度告警', e: eids.find((e) => /high.*temp|overheat/i.test(e)) || '', unit: '' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 新风系统 / 全热交换 ── */
+    '新风|fresh_air|ventilation|hrv|erv|热交换|换气': (d, eids) => ({
+      always: true, sub: '风速 · 模式 · 空气质量', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '新风', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'seg', label: '风速', e: d.entity, domain: 'fan', opts_attr: 'speed_list' },
+          { k: 'seg', label: '模式', e: d.entity, domain: 'fan', opts_attr: 'preset_modes' },
+        ] },
+        { t: '空气质量', items: [
+          { k: 'ro', label: '室内 CO₂', e: eids.find((e) => /co2/i.test(e)) || '', unit: ' ppm' },
+          { k: 'ro', label: '室内 PM2.5', e: eids.find((e) => /pm25|pm2_5/i.test(e)) || '', unit: ' μg/m³' },
+          { k: 'ro', label: '室内湿度', e: eids.find((e) => /humidity/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+        { t: '滤芯', items: [
+          { k: 'ro', label: 'HEPA 寿命', e: eids.find((e) => /hepa|filter/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 投影仪 / 激光电视 ── */
+    '投影|projector|激光电视|laser.*tv|beam': (d, eids) => ({
+      always: true, sub: '电源 · 输入源 · 画质', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '投影', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'seg', label: '输入源', e: d.entity, domain: 'media_player', opts_attr: 'source_list', field: 'source' },
+        ] },
+        { t: '画质 · 音频', items: [
+          { k: 'num', label: '亮度', e: eids.find((e) => /brightness/i.test(e)) || '', unit: '%' },
+          { k: 'num', label: '音量', e: d.entity, unit: '%', aval: 'volume_level', min: 0, max: 1 },
+        ].filter((x) => x.e) },
+        { t: '状态', items: [
+          { k: 'ro', label: '运行时长', e: eids.find((e) => /runtime|hours/i.test(e)) || '', unit: ' 小时' },
+          { k: 'ro', label: '灯泡/滤网寿命', e: eids.find((e) => /bulb|lamp|filter/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 智能花盆 / 植物生长灯 ── */
+    '花盆|plant|grow.*light|植物灯|种植|hydroponic': (d, eids) => ({
+      always: true, sub: '光照 · 浇水 · 环境', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '光照', items: [
+          { k: 'sw', label: '植物灯', e: eids.find((e) => /light|lamp/i.test(e)) || d.entity },
+          { k: 'num', label: '光照强度', e: eids.find((e) => /brightness|light/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+        { t: '浇水', items: [
+          { k: 'btn', label: '手动浇水', e: eids.find((e) => /water|pump/i.test(e)) || '', svc: 'turn_on', text: '💧 浇水', dom: 'switch' },
+        ].filter((x) => x.e) },
+        { t: '环境读数', items: [
+          { k: 'ro', label: '土壤湿度', e: eids.find((e) => /soil|moisture/i.test(e)) || '', unit: '%' },
+          { k: 'ro', label: '温度', e: eids.find((e) => /temp/i.test(e)) || '', unit: '°C' },
+          { k: 'ro', label: '光照值', e: eids.find((e) => /lux|illuminance/i.test(e)) || '', unit: ' lux' },
+          { k: 'ro', label: '电量', e: eids.find((e) => /battery/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 宠物喂食器 / 饮水机 ── */
+    '喂食|feeder|宠物|pet|饮水机|water.*fountain': (d, eids) => ({
+      always: true, sub: '喂食 · 水位 · 提醒', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '喂食器', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'btn', label: '立即喂食', e: d.entity, svc: 'turn_on', text: '🍖 喂食', dom: 'switch' },
+        ] },
+        { t: '喂食计划', items: [
+          { k: 'ro', label: '今日已喂', e: eids.find((e) => /fed|today/i.test(e)) || '', unit: ' 次' },
+          { k: 'ro', label: '粮仓余量', e: eids.find((e) => /food|hopper|bin/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+        { t: '饮水机', items: [
+          { k: 'ro', label: '水箱水位', e: eids.find((e) => /water|tank|level/i.test(e)) || '', unit: '%' },
+          { k: 'ro', label: '滤芯寿命', e: eids.find((e) => /filter/i.test(e)) || '', unit: '%' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 电动床 / 智能床 ── */
+    '电动床|智能床|bed|mattress|adjustable.*bed': (d, eids) => ({
+      always: true, sub: '角度 · 按摩 · 闹钟', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '床头角度', items: [
+          { k: 'num', label: '床头角度', e: d.entity, unit: '°', min: 0, max: 60 },
+          { k: 'sw', label: '一键放平', e: eids.find((e) => /flat|zero/i.test(e)) || '' },
+        ].filter((x) => x.e) },
+        { t: '按摩', items: [
+          { k: 'sw', label: '按摩', e: eids.find((e) => /massage/i.test(e)) || '' },
+          { k: 'seg', label: '按摩模式', e: eids.find((e) => /massage.*mode/i.test(e)) || '' },
+        ].filter((x) => x.e) },
+        { t: '环境', items: [
+          { k: 'ro', label: '床垫温度', e: eids.find((e) => /mattress.*temp|bed.*temp/i.test(e)) || '', unit: '°C' },
+          { k: 'ro', label: '环境噪声', e: eids.find((e) => /noise|sound/i.test(e)) || '', unit: ' dB' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 地暖 / 暖气片 ── */
+    '地暖|暖气片|供热|heating|radiator|floor.*heat': (d, eids) => ({
+      always: true, sub: '目标温度 · 模式', open: '设置', echo: [{ e: d.entity }],
+      groups: [
+        { t: '温控', items: [
+          { k: 'sw', label: '通断', e: d.entity },
+          { k: 'num', label: '目标温度', e: d.entity, unit: '°C', min: 15, max: 30, aval: 'temperature', svc: 'climate.set_temperature' },
+          { k: 'ro', label: '当前温度', e: d.entity, unit: '°C', attr: 'current_temperature' },
+        ] },
+        { t: '模式', items: [
+          { k: 'seg', label: '运行模式', e: d.entity, domain: 'climate', opts_attr: 'preset_modes' },
+        ] },
+      ].filter((g) => g.items.length)
+    }),
+    /* ── 烟雾/燃气/水浸/人体 传感器面板（安全类） ── */
+    '烟雾|smoke|燃气|gas|水浸|water.*leak|漏水|人体|motion| presence|入侵|intrusion': (d, eids) => ({
+      always: true, sub: '状态 · 告警', open: '查看', echo: [{ e: d.entity }],
+      groups: [
+        { t: '传感器状态', items: [
+          { k: 'ro', label: '当前状态', e: d.entity, unit: '' },
+          { k: 'ro', label: '电池电量', e: eids.find((e) => /battery/i.test(e)) || '', unit: '%' },
+          { k: 'ro', label: '信号强度', e: eids.find((e) => /rssi|signal/i.test(e)) || '', unit: ' dBm' },
+        ].filter((x) => x.e) },
+      ].filter((g) => g.items.length)
+    }),
   };
   function matchDeviceTemplate(d, eids) {
     if (!d || !d.name) return null;
