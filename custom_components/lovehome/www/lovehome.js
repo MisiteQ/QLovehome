@@ -1785,69 +1785,89 @@
 
   /* ── 把一台设备的所有兄弟实体自动拼成 ctl 配置 ──
      批量导入进来的马桶/净化器等复合设备没有预配置 ctl，
-     这里根据 d.entities[] 数组遍历生成控件组，效果和模板里的马桶完全一样 */
+     这里根据 d.entities[] 数组遍历生成控件组，效果和模板里的马桶尽量一致 */
   function autoBuildComposite(d) {
     const eids = (d.entities || []).filter((e) => e && e !== d.entity);  // 去掉主实体（主实体已在 d.entity）
     if (!eids.length) return null;
 
     const groups = [];
-    const g1 = { t: '开关 · 模式', items: [] };
-    const g2 = { t: '滑块 · 数值', items: [] };
-    const g3 = { t: '按钮 · 操作', items: [] };
-    const g4 = { t: '状态 · 读数', items: [] };
+    // 更细的分组：主开关/模式 seg/温度滑块/按钮/读数
+    const gMain  = { t: '总开关', items: [] };
+    const gMode  = { t: '模式 · 分段', items: [] };
+    const gSlider= { t: '滑块 · 数值', items: [] };
+    const gBtn   = { t: '按钮 · 操作', items: [] };
+    const gRead  = { t: '状态 · 读数', items: [] };
+
+    // 关键字：名字里有 mode/模式/预设/风速/摆风 的 switch → 当 seg 处理
+    const SKIP_DOMAINS = new Set(['camera', 'image', 'tts', 'notify']);
 
     eids.forEach((eid) => {
       const s = st(eid);
       if (!s) return;
       const dom = eid.split('.')[0];
-      const fname = (s.attributes && s.attributes.friendly_name) || eid.split('.')[1] || eid;
-      const label = fname.length > 14 ? fname.slice(0, 13) + '…' : fname;
+      if (SKIP_DOMAINS.has(dom)) return;
+      const at = s.attributes || {};
+      const fname = at.friendly_name || eid.split('.')[1] || eid;
+      const label = fname.length > 16 ? fname.slice(0, 15) + '…' : fname;
 
       switch (dom) {
         case 'switch': case 'light':
-          g1.items.push({ k: 'sw', label, e: eid }); break;
-        case 'select':
-          g1.items.push({ k: 'seg', label, e: eid }); break;
-        case 'number': {
-          const at = s.attributes || {};
+        case 'cover': case 'fan':
+        case 'media_player': case 'vacuum':
+        case 'water_heater': case 'humidifier':
+        case 'lock': case 'valve':
+        case 'remote':
+          gMain.items.push({ k: 'sw', label, e: eid }); break;
+        case 'select': case 'input_select':
+          gMode.items.push({ k: 'seg', label, e: eid }); break;
+        case 'climate': {
+          // climate 主实体：如果 entities 里没有单独的 switch，这里也做 sw
+          gMain.items.push({ k: 'sw', label: label || '电源', e: eid }); break;
+        }
+        case 'number': case 'input_number': {
           const step = Number(at.step) || 1;
           const unit = at.unit_of_measurement || '';
-          g2.items.push({ k: 'num', label, e: eid, step, unit }); break;
+          const mn = Number(at.min), mx = Number(at.max);
+          gSlider.items.push({ k: 'num', label, e: eid, step, unit,
+            ...(!isNaN(mn) ? { min: mn } : {}),
+            ...(!isNaN(mx) ? { max: mx } : {}) }); break;
         }
         case 'cover':
-          g1.items.push({ k: 'sw', label, e: eid }); break;
         case 'fan': case 'media_player':
-          g1.items.push({ k: 'sw', label, e: eid }); break;
         case 'water_heater': case 'humidifier':
-          g2.items.push({ k: 'num', label, e: eid, unit: '°' }); break;
         case 'lock': case 'vacuum':
-          g1.items.push({ k: 'sw', label, e: eid }); break;
-        case 'button':
-          g3.items.push({ k: 'btn', label, e: eid, text: fname.slice(-2) }); break;
-        case 'sensor': case 'binary_sensor': {
-          const at = s.attributes || {};
+          gMain.items.push({ k: 'sw', label, e: eid }); break;
+        case 'button': case 'script': case 'scene':
+          gBtn.items.push({ k: 'btn', label, e: eid, text: fname.slice(-2) || '执行' }); break;
+        case 'sensor': case 'binary_sensor': case 'input_text': case 'text': {
           const unit = at.unit_of_measurement || '';
-          g4.items.push({ k: 'ro', label, e: eid, unit }); break;
+          gRead.items.push({ k: 'ro', label, e: eid, unit }); break;
         }
         default:
-          g4.items.push({ k: 'ro', label, e: eid });
+          gRead.items.push({ k: 'ro', label, e: eid });
       }
     });
 
-    if (g1.items.length) groups.push(g1);
-    if (g2.items.length) groups.push(g2);
-    if (g3.items.length) groups.push(g3);
-    if (g4.items.length) groups.push(g4);
+    [gMain, gMode, gSlider, gBtn, gRead].forEach((g) => {
+      if (g.items.length) groups.push(g);
+    });
     if (!groups.length) return null;
 
-    // echo 行：取主实体 + 第一个 select/switch 的状态做副标
+    // echo 行：取主实体 + 第一个模式实体的状态做副标
     const echo = [];
     const mainSt = st(d.entity);
     if (mainSt && mainSt.state) echo.push({ e: d.entity });
-    const modeSelect = eids.find((e) => e.startsWith('select.'));
-    if (modeSelect) echo.push({ e: modeSelect });
+    const modeEid = [...gMode.items, ...gMain.items].find((it) =>
+      eids.includes(it.e) && (it.k === 'seg' || /mode|模式/i.test(it.label)));
+    if (modeEid) echo.push({ e: modeEid.e });
 
-    return { always: true, sub: g1.items.length + ' 可开关 · ' + g4.items.length + ' 读数', open: '设置', echo, groups };
+    const ctl = {
+      always: true,
+      sub: groups.filter((g) => g.items.some((i) => i.k !== 'ro')).length + ' 组可操作 · ' + gRead.items.length + ' 读数',
+      open: '设置',
+      echo, groups
+    };
+    return ctl;
   }
 
   function openControl(d) {

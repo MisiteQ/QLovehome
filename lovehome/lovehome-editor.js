@@ -2044,7 +2044,8 @@
         <button class="lh-ed-btn" id="bulkCancel" type="button">取消</button>
         <span class="hint" id="bulkCount" style="margin-left:12px">已勾选 0 台设备</span>
         <button class="lh-ed-btn primary" id="bulkDo" type="button" style="margin-left:auto">导入 →</button>
-      </div>`;
+      </div>
+    </div>`;
     dlg.innerHTML = html;
     document.body.appendChild(dlg);
 
