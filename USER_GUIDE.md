@@ -1,0 +1,291 @@
+# QLoveHome · 使用帮助（详细版）
+
+> **适用版本**：v1.0.0  
+> **适用人群**：Home Assistant 2024.6+ 用户  
+> **前置条件**：已安装 Home Assistant，有一台平板（门口 / 客厅常亮）
+
+---
+
+## 目录
+
+1. [这套面板能做什么？](#1-这套面板能做什么)
+2. [快速安装（10 分钟）](#2-快速安装10-分钟)
+   - 方式 A：HACS 一键（推荐）
+   - 方式 B：手动复制（不想装 HACS）
+   - 方式 C：纯 iframe（最简，但不能用编辑器）
+3. [接线：把你的设备接进来](#3-接线把你的设备接进来)
+   - 第 1 步：跑通默认数据（先看效果）
+   - 第 2 步：改 gen_lovehome_data.py（接你的实体）
+   - 第 3 步：生成 & 部署
+   - 第 4 步：浏览器缓存
+4. [换户型](#4-换户型)
+5. [主题与个性化](#5-主题与个性化)
+6. [可视化编辑器](#6-可视化编辑器)
+7. [常见问题排错](#7-常见问题排错)
+
+---
+
+## 1. 这套面板能做什么
+
+一张图看完你的家：
+
+| 区域 | 内容 |
+|---|---|
+| **户型图** | 矢量渲染的房间布局，墙体自动融合；点房间看温湿度和中控 |
+| **右栏** | 常用设备快捷开关 + 安防网关在线状态 |
+| **概览面板** | 家人在线 · 用电 · 安防 · 各屋温湿度 · 电池电量 · 摄像头 · 网络 · 系统 |
+| **家电页** | 按品牌 / 类型聚合，灯、插座、空调、风扇、窗帘统一开关调光 |
+| **屏保** | 无操作自动进大屏时钟，触控 / 键盘 / 滚轮任意操作唤醒 |
+
+**零 YAML、零 Lovelace 配置、零 Webpack。** 纯 HTML + SVG + JS iframe，读 `parent.hass` 拿状态、调服务。
+
+---
+
+## 2. 快速安装（10 分钟）
+
+### 方式 A：HACS 一键（推荐）
+
+如果你已经装了 HACS：
+
+1. **HACS → 集成 → 右上角 ⋮ → 自定义存储库**
+2. URL：`https://github.com/MisiteQ/QLovehome`
+3. 类别：**集成**
+4. 搜索 "QLoveHome" → 点 **下载** → 完成后点 **重载**
+5. **设置 → 设备与服务 → 添加集成 → QLoveHome** → 按向导选 dashboard
+6. 回到 Dashboard，应该会自动出现一个 QLoveHome 卡片。如果没有，手动加「网页卡片（iframe）」→ 地址填：
+   ```
+   /api/lovelace/lovehome/
+   ```
+7. 开爽 🎉
+
+### 方式 B：手动复制（不想装 HACS）
+
+```bash
+# Windows PowerShell（把 d:\CODE\QLovehome 换成你解压的路径）
+Copy-Item -Recurse -Force "d:\CODE\QLovehome\custom_components\lovehome" "C:\Users\<你>\.homeassistant\custom_components\"
+
+# 或 Linux / macOS / HAOS（进入 HA 的 shell 执行）
+cp -r custom_components/lovehome/ /config/custom_components/
+```
+
+然后**重启 HA**，按方式 A 的第 5-6 步走。
+
+### 方式 C：纯 iframe（最简，但不能用编辑器）
+
+如果你只是想快速看看效果，不需要 HA 集成：
+
+```bash
+# 把前端文件复制到 HA 的 www 目录
+cp -r custom_components/lovehome/www/ /config/www/lovehome/
+```
+
+Dashboard → **网页卡片（iframe）** → 地址：
+```
+/local/lovehome/index.html
+```
+
+> 这种方式跳过了 config_flow，无法自动注册 panel_custom，编辑器的"保存到 HA 配置"按钮也不会生效。但不影响主界面展示和设备控制。
+
+---
+
+## 3. 接线：把你的设备接进来
+
+### 第 1 步：跑通默认数据（先看效果）
+
+**什么都不改**，先跑一次：
+
+```bash
+python gen_lovehome_data.py
+```
+
+它会生成 `lovehome-data.js`，把它复制到 HA：
+- HACS 安装：已经在 `www/` 里了（zip 自带默认数据）
+- 手动安装：`cp lovehome-data.js /config/www/lovehome/`
+
+然后 Dashboard iframe 地址末尾加个 `?v=1`，刷新看效果。**实体 ID 对不上不会报错**，只会显示「—」和灰色图标。
+
+### 第 2 步：改 gen_lovehome_data.py（接你的实体）
+
+打开 `gen_lovehome_data.py`，找到这些区块：
+
+```python
+# === 1. 房间（9 个模板房间，改名字也行） ===
+rooms = [
+    {"id": "living", "name": "客餐厅", "pts": "...", "lxs": "sensor.living_temp", "lxs2": "sensor.living_hum"},
+    ...
+]
+
+# === 2. 家电（每个房间的设备列表） ===
+devgroup("living", [
+    {"name": "餐厅主灯", "eid": "light.living_dining_light"},
+    {"name": "阳台台灯", "eid": "light.living_balcony_lamp", "dimmable": True},
+    ...
+])
+
+# === 3. 概览卡片（家人、用电、安防等） ===
+overview_panels = {
+    "family": [
+        {"name": "我", "eid": "device_tracker.my_phone"},
+        ...
+    ],
+    "electricity": {"eid": "sensor.electricity_daily"},
+    ...
+}
+```
+
+**常见实体 ID 映射**：
+
+| 要接什么 | HA 里找 | 实体 ID 格式 |
+|---|---|---|
+| 温湿度 | 设置 → 实体 → 搜 temp | `sensor.xxx_temperature` / `sensor.xxx_humidity` |
+| 灯 | 设置 → 实体 → 搜 light | `light.xxx_light` |
+| 插座 | 设置 → 实体 → 搜 plug | `switch.xxx_plug` 或 `light.xxx_plug` |
+| 空调 | 设置 → 实体 → 搜 climate | `climate.xxx_ac` |
+| 窗帘 | 设置 → 实体 → 搜 cover | `cover.xxx_curtain` |
+| 手机在线 | 设置 → 实体 → 搜 tracker | `device_tracker.xxx_phone` |
+| 用电 | 设置 → 实体 → 搜 energy | `sensor.xxx_energy` |
+| 摄像头 | 设置 → 实体 → 搜 camera | `camera.xxx_doorbell` |
+| 电池 | 设置 → 实体 → 搜 battery | `sensor.xxx_battery_level` |
+
+**不确定？** HA → **设置 → 实体** → 点设备 → 右边「点击复制」图标，就能拿到完整实体 ID。
+
+### 第 3 步：生成 & 部署
+
+```bash
+# Windows
+python gen_lovehome_data.py
+Copy-Item custom_components\lovehome\www\lovehome-data.js "C:\Users\<你>\.homeassistant\www\lovehome\"
+
+# HAOS / Linux
+python3 gen_lovehome_data.py
+cp custom_components/lovehome/www/lovehome-data.js /config/www/lovehome/
+```
+
+### 第 4 步：浏览器缓存
+
+**HA 把前端文件缓得很顽固。** 每次改了 js / css / html：
+
+1. Dashboard iframe 地址末尾的 `?v=N` **必须加 1**（比如 `?v=1` → `?v=2`）
+2. 刷新页面。还不生效就 **Ctrl+Shift+Delete** 清浏览器缓存
+
+---
+
+## 4. 换户型
+
+三种做法：
+
+| 方式 | 命令 | 适合 |
+|---|---|---|
+| A. 直接用模板 | 什么都不改 | 先看效果 |
+| B. 现实风照片底板 | 把你的户型照片存 `custom_components/lovehome/www/assets/plan-real.jpg`，跑 `python calib_real.py <原图路径>` | 想让照片当底板，上面叠设备图标 |
+| C. 重新提取多边形 | `python extract_rooms.py 标注图.png 户型图.png` → 生成新 `rooms_poly.json` → 再跑 gen 脚本 | 户型完全不同，想自定义房间形状 |
+
+`rooms_poly.json` 是**唯一几何源头**。墙体、房间色块、标签位置全由它推导。改了它之后跑 `gen_lovehome_data.py` 就重新生成一遍。
+
+---
+
+## 5. 主题与个性化
+
+点设置按钮（齿轮图标）→ 面板：
+
+| 设置项 | 说明 |
+|---|---|
+| **字体大小** | 85% ~ 125%，全局缩放 |
+| **面板透明度** | 左栏 + 右侧面板的背景透明度，默认 75% |
+| **主题（深/浅色）** | 默认跟随日出日落自动切换；可手动锁定 |
+| **四季配色** | 默认按节气自动换（立春入春、立夏入夏...）；可手动锁定 |
+| **待机时间** | 无操作后多久进屏保（1-60 分钟） |
+| **关于** | 版本号 + 功能亮点 |
+
+所有设置都存在**本机浏览器的 localStorage**，不上传服务器。换浏览器 / 清浏览器数据会重置。
+
+---
+
+## 6. 可视化编辑器
+
+主界面左下角有个编辑图标（铅笔），点进去进入编辑器。
+
+### 快捷键
+
+| 操作 | 效果 |
+|---|---|
+| **空格 + 拖动** | 平移画布 |
+| **鼠标滚轮** | 缩放（以鼠标位置为锚，0.3× ~ 5×） |
+| **Ctrl/⌘ + 0** | 重置缩放和位置 |
+| **矩形房间** | 按住鼠标从一角拖到对角 |
+| **圆形房间** | 按住鼠标从圆心拖出半径 |
+| **多边形** | 逐点点击画异形 |
+| **双击房间** | 弹框改名 |
+| **Delete / Backspace** | 删除选中 |
+| **Ctrl/⌘ / Shift + 点击** | 多选 |
+| **右键** | 取消当前操作 |
+| **Esc** | 退出编辑器 |
+
+### 房间名字拖拽
+
+主界面上，每个房间名字（包括温度数字）都可以直接**按住鼠标拖到任意位置**，松开自动保存到浏览器。
+
+---
+
+## 7. 常见问题排错
+
+| 现象 | 原因 | 解决 |
+|---|---|---|
+| 页面空白 | iframe 地址写错 / 文件没传 | 确认 Dashboard 卡片 URL；确认 `/config/www/lovehome/` 下有 index.html |
+| 全是「—」 | 实体 ID 没换成你的 | 打开开发者工具 → 控制台输 `LH.rooms.map(r=>r.lxs)` 看实际读的是什么 |
+| 图标有但点不动 | 该设备的 HA 服务不存在 | HA → **开发者工具 → 服务** → 搜该设备 → 手动触发试试 |
+| 改了没生效 | 浏览器缓存 | `?v=N` 加 1；还不行 Ctrl+Shift+R 硬刷新 |
+| 手机上侧栏不见了 | 正常行为 | ≤900px 窄屏模式，侧栏自动切到顶部下拉 |
+| 墙太厚 / 太薄 | 墙带 pad 值 | 编辑器里改房间形状后重新生成，或临时 Console 输 `LH.plan.wallW=10` |
+| 待机时间想调长 | 设置面板限制 60 分钟 | 可以改 localStorage 里的 `lhStandby`，或手动设置后刷新 |
+| 房间内部有灰色线 | 旧版本 room-shape 透明度不够 | 更新 lovehome.js ≥ v257 |
+| 墙带和房间有缝隙 | unionPolys pad 偏差 | 更新 lovehome.js ≥ v257，内边界直接用房间原始 path |
+| 季节性配色太浓 | room-shape fill 透明度 | 更新 lovehome.css ≥ v255（已调浅 35-45%） |
+| 设置面板导航点击跳转中间 | offsetTop 在多层 div 不准 | 更新 lovehome.js ≥ v265 |
+
+### 调试工具
+
+打开 HA Dashboard → iframe 页面 → 按 F12 开 Console：
+
+```js
+LH.rooms           // 查看所有房间数据
+LH.plan            // 查看户型参数
+LH.overview        // 查看概览配置
+localStorage        // 查看本地存储（待机时间、主题、标签位置）
+```
+
+---
+
+## 目录结构速查（用户版 zip）
+
+```
+QLoveHome-v1.0.0/
+├── custom_components/lovehome/          # ← 复制到 /config/custom_components/
+│   ├── __init__.py
+│   ├── config_flow.py
+│   ├── const.py
+│   ├── manifest.json
+│   ├── strings.json
+│   ├── translations/{en.json, zh-Hans.json}
+│   └── www/                              # ← 已经包含在集成里，部署时自动加载
+│       ├── index.html
+│       ├── lovehome.js
+│       ├── lovehome-editor.js
+│       ├── lovehome.css
+│       ├── lovehome-data.js
+│       ├── QLovehome.png
+│       └── assets/{bg-day.jpg, bg-night.jpg, plan-real.jpg}
+│
+├── gen_lovehome_data.py                  # ⭐ 改这个接你的设备
+├── hacs.json
+├── info.md
+├── README.md
+├── USER_GUIDE.md                         # 本文件
+└── LICENSE
+```
+
+`lovehome/` 源码头、`rooms_poly.json`、`optional-patches/` 都在 GitHub 仓库里，用户版 zip 不包含——但这些对**运行**不是必需的。
+
+---
+
+**遇到问题？** → https://github.com/MisiteQ/QLovehome/issues
