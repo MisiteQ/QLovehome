@@ -2771,9 +2771,11 @@
       (ents || []).forEach((e) => {
         if (e.disabled_by || e.hidden_by) return;
         const plat = e.platform || '';
-        /* 只认两个米家集成；HACS 自己的 update.*（Xiaomi Home 更新）不算设备，别混进来 */
-        if (plat !== 'xiaomi_home' && plat !== 'xiaomi_miot') return;
-        if (e.entity_id.indexOf('update.') === 0) return;
+        /* 跳过这些纯辅助 / 状态域：不是设备控制实体 */
+        const SKIP = ['update.', 'automation.', 'script.', 'scene.', 'sun.', 'zone.',
+                      'calendar.', 'schedule.', 'todo.', 'shopping_list.', 'image_processing.',
+                      'stt.', 'tts.', 'assist_satellite.', 'conversation.', 'notify.'];
+        if (SKIP.some((x) => e.entity_id.indexOf(x) === 0)) return;
         const dv = D[e.device_id] || {};
         const nm = dv.name_by_user || dv.name || '';
         if (e.device_id && usedDev.has(e.device_id)) return;
@@ -2840,10 +2842,82 @@
         body.append(it);
         const box = el('div', 'mi-ents');
         box.innerHTML = '<div class="mi-doms">' + r.doms.map((d) => (DOM_NAME[d] || d)).join(' · ') + '</div>' +
-          r.ents.map((e) => '<code>' + e + '</code>').join('');
+          r.ents.map((e) => '<code>' + e + '</code>').join('') +
+          '<div class="mi-import"><button type="button" class="mi-import-btn" data-mi="' + i + '">➕ 导入到面板（选实体）</button></div>';
         box.hidden = true;
         body.append(box);
         it.addEventListener('click', () => { box.hidden = !box.hidden; it.classList.toggle('open', !box.hidden); });
+        box.querySelector('.mi-import-btn').addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          importMissingRow(r);
+        });
+      });
+    });
+  }
+
+  /* 从「其他设备」里把一台未接入设备的某个实体导入到面板
+     弹窗：列出该设备所有实体（带 domain / 状态 / friendly_name）→ 用户点一个 → 自动创建设备 */
+  function importMissingRow(row) {
+    const h = hass();
+    if (!h) { alert('未连接到 HA'); return; }
+    const DEVICE_KIND = {
+      light: 'light', switch: 'plug', climate: 'ac', cover: 'cover',
+      fan: 'fan', media_player: 'media', lock: 'lock', camera: 'cam',
+      water_heater: 'heater', humidifier: 'appliance', vacuum: 'appliance',
+      siren: 'appliance', valve: 'appliance', select: 'panel', button: 'panel',
+      number: 'sensor', binary_sensor: 'sensor', sensor: 'sensor'
+    };
+    const ENTS_SKIP = new Set(['binary_sensor', 'sensor']);  // 纯状态类不建议当设备
+    const ctrEnts = row.ents.filter((e) => !ENTS_SKIP.has(e.split('.')[0]));
+    const rows = ctrEnts.length ? ctrEnts : row.ents;  // 全是状态类就全列出来
+
+    let html = '<div class="mi-import-dialog"><b>从「' + row.name + '」选一个实体接入面板</b>' +
+      '<div class="mi-import-list">';
+    rows.forEach((eid) => {
+      const s = h.states[eid] || {};
+      const fname = (s.attributes && s.attributes.friendly_name) || eid;
+      const domain = eid.split('.')[0];
+      const state = s.state || '—';
+      html += '<button type="button" class="mi-ent-pick" data-eid="' + eid + '">' +
+        '<span class="mi-ent-fn">' + fname + '</span>' +
+        '<code class="mi-ent-id">' + eid + '</code>' +
+        '<span class="mi-ent-state">' + state + '</span>' +
+        '</button>';
+    });
+    html += '</div><div class="mi-import-hint">选一个最有代表性的实体（比如这台空调的 climate.*），' +
+      '面板会自动推断类型和图标。坐标空着也行，稍后在编辑器里拖到户型图上。</div></div>';
+
+    const dlg = el('div', 'lh-ed-dialog');
+    dlg.innerHTML = '<div class="lh-ed-dialog-mask"></div><div class="lh-ed-dialog-body" style="max-width:560px">' + html +
+      '<div class="lh-ed-dialog-foot"><button type="button" class="mi-import-cancel">取消</button></div></div>';
+    document.body.appendChild(dlg);
+    setTimeout(() => dlg.classList.add('open'), 10);
+    const closeIt = () => dlg.remove();
+    dlg.querySelector('.lh-ed-dialog-mask').addEventListener('click', closeIt);
+    dlg.querySelector('.mi-import-cancel').addEventListener('click', closeIt);
+    dlg.querySelectorAll('.mi-ent-pick').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const eid = btn.dataset.eid;
+        const domain = eid.split('.')[0];
+        const kind = DEVICE_KIND[domain] || 'appliance';
+        const s = h.states[eid] || {};
+        const fname = (s.attributes && s.attributes.friendly_name) || eid;
+        // 加到 LH.devices
+        window.LH.devices = window.LH.devices || [];
+        const newDev = {
+          id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          name: fname, kind: kind, entity: eid, room: '', x: null, y: null
+        };
+        window.LH.devices.push(newDev);
+        // 持久化
+        if (window.LHEditor && window.LHEditor.saveConfig) window.LHEditor.saveConfig();
+        closeIt();
+        // 触发主界面重绘
+        document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+        // 刷新未接入清单
+        state.missing = null;
+        loadMissing(true).then(() => openOther(true));
+        toastHint('已添加「' + fname + '」到面板 · 打开编辑器配房间/位置');
       });
     });
   }
@@ -4806,6 +4880,18 @@
 
   let tick = null;
   function boot() {
+    // ★ 关键：先读用户保存的配置覆盖模板
+    // 编辑器 persist() 保存到 localStorage('lovehome.config.v1')
+    // 主界面必须先读这个，否则刷新就回到模板（用户啥都白改）
+    try {
+      const raw = localStorage.getItem('lovehome.config.v1');
+      if (raw) {
+        const saved = JSON.parse(raw);
+        const SECTIONS = ['config', 'plan', 'rooms', 'devices', 'readouts',
+                          'scenes', 'filters', 'appliances', 'supplies', 'panel', 'missing'];
+        for (const k of SECTIONS) if (saved[k] != null) window.LH[k] = saved[k];
+      }
+    } catch (e) { console.warn('[LoveHome] 读取保存配置失败', e); }
     buildPlan();
     buildSide();
     /* 刷新后默认收起房间面板，右列显示「天气 · 用电」——

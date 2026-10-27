@@ -1803,11 +1803,13 @@
     // 已经绑定过的实体 → 跳过（避免重复）
     const existingEntities = new Set((window.LH.devices || []).map((d) => d.entity).filter(Boolean));
 
-    // 收集 HA 里的实体，按 domain 分组；过滤掉 binary_sensor / sensor 等纯状态的
-    const SKIP_DOMAINS = new Set(['binary_sensor', 'sensor', 'history_stats', 'input_boolean',
+    // 收集 HA 里的实体，按 domain 分组；只跳过纯脚本/辅助类
+    const SKIP_DOMAINS = new Set(['history_stats', 'input_boolean',
                                   'input_select', 'input_number', 'input_datetime', 'script', 'scene',
-                                  'automation', 'group', 'person', 'zone', 'device_tracker', 'sun',
-                                  'timer', 'counter', 'proximity']);
+                                  'automation', 'group', 'person', 'zone', 'sun',
+                                  'timer', 'counter', 'proximity', 'update', 'calendar',
+                                  'schedule', 'todo', 'shopping_list', 'image_processing',
+                                  'stt', 'tts', 'assist_satellite', 'conversation', 'notify']);
     const groups = {};  // domain -> [{eid, name, state, domain}]
     for (const eid of Object.keys(states)) {
       const domain = eid.split('.')[0];
@@ -1825,10 +1827,15 @@
       light: '💡 灯光', switch: '🔌 开关/插座', climate: '❄️ 空调/采暖',
       cover: '🪟 窗帘', fan: '🌀 风扇', media_player: '📺 影音',
       lock: '🔒 门锁', camera: '📷 摄像头', water_heater: '🚿 热水器',
-      humidifier: '💨 加湿器', vacuum: '🤖 扫地机', siren: '🚨 警报器'
+      humidifier: '💨 加湿器', vacuum: '🤖 扫地机', siren: '🚨 警报器',
+      valve: '💧 水阀', select: '📋 选项', number: '🔢 数值',
+      button: '🔘 按钮', sensor: '📏 传感器', binary_sensor: '⚡ 状态传感器',
+      device_tracker: '📍 定位', remote: '📱 遥控器'
     };
     const DOMAIN_ORDER = ['light', 'switch', 'climate', 'cover', 'fan', 'media_player',
-                          'lock', 'camera', 'water_heater', 'humidifier', 'vacuum', 'siren'];
+                          'lock', 'camera', 'water_heater', 'humidifier', 'vacuum', 'siren',
+                          'valve', 'remote', 'button', 'select', 'number',
+                          'sensor', 'binary_sensor', 'device_tracker'];
 
     // 构建弹窗
     const dlg = el('div', 'lh-ed-dialog bulk-import');
