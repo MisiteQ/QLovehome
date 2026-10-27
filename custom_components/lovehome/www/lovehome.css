@@ -2328,6 +2328,8 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .bulk-dev-kind { background: rgba(255,170,40,0.15); color: var(--amber-2, #e08a20); padding: 1px 6px; border-radius: 6px; font-weight: 500; }
 .bulk-dev-model { opacity: 0.7; font-family: ui-monospace, monospace; font-size: 10px; }
 .bulk-dev-count { font-weight: 500; }
+.bulk-dev-toggle { border: none; background: none; cursor: pointer; font-size: 14px; color: var(--s3, #8892a6); padding: 0 4px; margin-left: auto; }
+.bulk-dev-toggle:hover { color: var(--fg, #1a202c); }
 .bulk-dev-ents { display: flex; flex-direction: column; padding: 4px 8px; gap: 2px; max-height: 240px; overflow-y: auto; }
 .lh-ent-picker { position: relative; }
 .lh-ent-dropdown { position: fixed; background: var(--bg1, #fff); border: 1px solid var(--bd2, #e3e6eb); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 9999; overflow: hidden; }

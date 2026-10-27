@@ -1488,6 +1488,10 @@
   /* 点设备一律打开控制弹窗（相机走画面弹窗，只读实体走详情），不再直接翻转开关 */
   function tapDevice(d) { openControl(d); }
 
+  /* ── 注意：v1.2.1 起，每个 d 可能有 d.entities[] 数组，包含同物理设备所有 entity_id。
+     目前控制面板只用 d.entity（主实体）做显示和下发，d.entities[] 暂未使用。
+     未来可以用它在控制面板上展示同设备的传感器读数（温湿度、电量等）。 */
+
   function toggle(d) {
     const s = st(d.entity);
     if (!s) { toast('实体未就绪 · ' + d.name); return; }
