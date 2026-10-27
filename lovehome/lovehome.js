@@ -576,11 +576,22 @@
   /* ── 户型 ── */
   const ROOM_GAP = 6;
   const ICON = {
+    // 基础
     light: 'i-bulb', ac: 'i-snow', heat: 'i-heat', fresh: 'i-wind', fan: 'i-fan',
     plug: 'i-plug', media: 'i-media', cover: 'i-cover', lock: 'i-lock',
     cam: 'i-cam', toilet: 'i-toilet', appliance: 'i-washer', hub: 'i-hub', sensor: 'i-wave',
     heater: 'i-tap', cook: 'i-pot', flame: 'i-flame',
-    panel: 'i-panel', bell: 'i-bell'
+    panel: 'i-panel', bell: 'i-bell',
+    // 清洁
+    vacuum: 'i-vacuum', purifier: 'i-purifier', humidifier: 'i-humidifier', leak: 'i-leak',
+    // 厨电
+    airfry: 'i-airfry', oven: 'i-oven', fridge: 'i-fridge', water_dispenser: 'i-water', wine: 'i-wine',
+    // 娱乐
+    speaker: 'i-speaker', projector: 'i-projector',
+    // 环境
+    plant: 'i-plant', pet: 'i-pet', bed: 'i-bed', presence: 'i-presence',
+    // 安防
+    siren: 'i-siren',
   };
   const GLOW_KINDS = { light: 1 };
   const markers = () => LH.devices.filter((d) => d.x != null);
@@ -3653,7 +3664,7 @@
     if (PPL.length) {
       const homeN = PPL.filter((p) => { const s = st(p.entity); return !!(s && s.state === 'on'); }).length;
       let withWatch = 0;
-      const ph = '<div class="ppl-grid">' + PPL.map((p) => {
+      const ph = '<div class="ppl-grid">' + PPL.map((p, pi) => {
         const s = st(p.entity);
         const on = !!(s && s.state === 'on');
         /* v222：配了手表的（墨墨）名字下面多一行小字：电量 · 充电 · 在哪。
@@ -3661,22 +3672,24 @@
         const w = watchOf(p);
         const line = w ? watchLine(w) : '';
         if (line) withWatch++;
+        const label = p.name || ('家人 ' + (pi + 1));
         return '<div class="ppl-i tap' + (on ? ' on' : '') + (line ? ' has-w' : '') +
           (w && w.batt != null && w.batt <= WATCH_LOW ? ' low' : '') + '"' +
-          ' data-name="' + p.name + '">' +
+          ' data-idx="' + pi + '">' +
           '<i class="d ' + (on ? 'ok' : 'no') + '"></i>' +
-          '<div class="ppl-m"><span>' + p.name + '</span>' +
+          '<div class="ppl-m"><span>' + label + '</span>' +
           (line ? '<em>' + line + '</em>' : '') + '</div>' +
           '<b>' + (on ? '在家' : '离家') + '</b></div>';
       }).join('') + '</div>' +
-        '<div class="card-sub">按设备联网判定（齐齐两台设备任一在线即算在家）· 手机休眠时可能短时显示离家'
-        + ' · 点一行看这个人的详情</div>';
+        '<div class="card-sub">按设备联网判定 · 手机休眠时可能短时显示离家'
+        + ' · 点一行看详情</div>';
       const pc = card('家人', 'i-user', homeN + ' 人在家', ph);
-      /* v225：每一行都可点 → 这个人的详情页（墨墨那页还带手表那一堆） */
+      /* v225：每一行都可点 → 详情页 */
       pc.querySelectorAll('.ppl-i').forEach((row) => {
         row.addEventListener('click', () => {
-          const p = PPL.find((x) => x.name === row.dataset.name);
-          if (p) openPerson(p);
+          const idx = Number(row.dataset.idx);
+          const p = PPL[idx];
+          if (p) openPerson(p, idx);
         });
       });
       box.append(pc);
@@ -4901,9 +4914,9 @@
     if (!w) {
       /* ② 没接设备的人：把位置留出来，等哪天配了手表 / 定位就自己长出来 */
       box.append(card('设备', 'i-watch', '未接入',
-        '<div class="card-sub">' + p.name + '还没接可以定位的设备（儿童手表 / 手机定位那类），'
+        '<div class="card-sub">这位家人还没接可以定位的设备（儿童手表 / 手机定位那类），'
         + '所以这一页目前只有上面的在家判定。等接上了，这里会自动多出'
-        + '「电量 · 位置 · 这台设备」三块 —— 跟墨墨那页一样。</div>'));
+        + '「电量 · 位置 · 这台设备」三块 —— 跟接了手表的一样。</div>'));
       return;
     }
     buildWatchCards(box, p, w);
@@ -4971,10 +4984,11 @@
     box.append(c3);
   }
 
-  /* v225：三人共用这一个弹窗（原来叫 openWatch，只有墨墨有手表才点得到） */
-  function openPerson(p) {
+  /* v225：家人详情弹窗 */
+  function openPerson(p, idx) {
     const has = !!(p.watch && p.watch.tracker);
-    showLayer(p.name, has ? '在家状态 · ' + (p.watch.label || '手表') : '在家状态', 'pop-wide');
+    const title = p.name || (idx != null ? ('家人 ' + (idx + 1)) : '家人详情');
+    showLayer(title, has ? '在家状态 · ' + (p.watch.label || '手表') : '在家状态', 'pop-wide');
     $('#layerBody').innerHTML = '<div class="cards layer-cards" id="personCards"></div>';
     buildPerson(p);
     clearInterval(state.pageTimer);
@@ -4991,7 +5005,8 @@
   function paintPeople() {
     const bar = $('#peopleBar');
     if (!bar) return;
-    (LH.config.overview || {}).people?.forEach((p) => {
+    const PPL = (LH.config.overview || {}).people || [];
+    PPL.forEach((p, pi) => {
       const chip = bar.querySelector('[data-ent="' + p.entity + '"]');
       if (!chip) return;
       const s = st(p.entity);
@@ -5000,7 +5015,7 @@
       chip.classList.toggle('on', on);
       chip.classList.toggle('low', !!(w && w.batt != null && w.batt <= WATCH_LOW));
       const line = w ? watchLine(w) : '';
-      chip.title = p.name + ' · ' + (on ? '在家'
+      chip.title = '家人 ' + (pi + 1) + ' · ' + (on ? '在家'
         : s && s.state !== 'unavailable' && s.state !== 'unknown' ? '离家' : '检测中') +
         (line ? ' · ' + line : '') + ' · 点开看详情';
     });
@@ -5272,19 +5287,18 @@
       scenes.append(b);
     });
 
-    /* 家人在线（v218）：接在情景按钮后面的三个小 chip。
-       v225：三个人点开都是「自己的详情页」（墨墨那页多一块手表），不再跳整张概览。 */
+    /* 家人在线（v218）：接在情景按钮后面的小 chip，不显示具体人名 */
     const pbar = $('#peopleBar');
     if (pbar) {
       const PPL = (LH.config.overview || {}).people || [];
-      PPL.forEach((p) => {
+      PPL.forEach((p, pi) => {
         const b = el('button', 'ppl-chip');
         b.type = 'button';
         b.dataset.ent = p.entity;
-        b.title = p.name + ' · 按设备联网判定，点开看详情';
+        b.title = '家人 ' + (pi + 1) + ' · 按设备联网判定，点开看详情';
         b.innerHTML = '<svg><use href="#' + (p.watch ? 'i-watch' : 'i-user') + '"/></svg>' +
-          '<span>' + p.name + '</span><i class="d"></i>';
-        b.addEventListener('click', () => openPerson(p));
+          '<i class="d"></i>';
+        b.addEventListener('click', () => openPerson(p, pi));
         pbar.append(b);
       });
       paintPeople();

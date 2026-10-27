@@ -2229,25 +2229,60 @@
      kind 必须是主程序认识的键（图标才显示得出来），这里的中文标签
      和 <use> 图标让用户不用记英文单词 */
   const KIND_OPTIONS = [
+    // 基础
     ['light', '灯'], ['ac', '空调'], ['heat', '地暖'], ['fresh', '新风'], ['fan', '风扇'],
     ['plug', '插座'], ['cover', '窗帘'], ['lock', '门锁'], ['cam', '摄像头'], ['toilet', '智能马桶'],
     ['appliance', '家电'], ['heater', '热水器'], ['cook', '烹饪'], ['flame', '燃气'],
-    ['media', '影音'], ['hub', '网关'], ['sensor', '传感器'], ['panel', '面板'], ['bell', '门铃']
+    ['media', '影音'], ['hub', '网关'], ['sensor', '传感器'], ['panel', '面板'], ['bell', '门铃'],
+    // 清洁
+    ['vacuum', '扫地机'], ['purifier', '空气净化器'], ['humidifier', '加湿器'], ['leak', '水浸传感器'],
+    // 厨电
+    ['airfry', '空气炸锅'], ['oven', '烤箱'], ['fridge', '冰箱'], ['water_dispenser', '饮水机'], ['wine', '酒柜'],
+    // 娱乐
+    ['speaker', '音箱'], ['projector', '投影仪'],
+    // 环境
+    ['plant', '植物灯'], ['pet', '宠物喂食'], ['bed', '电动床'], ['presence', '人体存在'],
+    // 安防
+    ['siren', '报警器']
   ];
   const KIND_ICON = {
+    // 基础
     light: 'i-bulb', ac: 'i-snow', heat: 'i-heat', fresh: 'i-wind', fan: 'i-fan',
     plug: 'i-plug', cover: 'i-cover', lock: 'i-lock', cam: 'i-cam', toilet: 'i-toilet',
     appliance: 'i-washer', heater: 'i-tap', cook: 'i-pot', flame: 'i-flame',
-    media: 'i-media', hub: 'i-hub', sensor: 'i-wave', panel: 'i-panel', bell: 'i-bell'
+    media: 'i-media', hub: 'i-hub', sensor: 'i-wave', panel: 'i-panel', bell: 'i-bell',
+    // 清洁
+    vacuum: 'i-vacuum', purifier: 'i-purifier', humidifier: 'i-humidifier', leak: 'i-leak',
+    // 厨电
+    airfry: 'i-airfry', oven: 'i-oven', fridge: 'i-fridge', water_dispenser: 'i-water', wine: 'i-wine',
+    // 娱乐
+    speaker: 'i-speaker', projector: 'i-projector',
+    // 环境
+    plant: 'i-plant', pet: 'i-pet', bed: 'i-bed', presence: 'i-presence',
+    // 安防
+    siren: 'i-siren',
   };
   /* 选实体时推荐这些 domain 的实体排在前面 */
   const KIND_DOMAINS = {
+    // 基础
     light: ['light'], ac: ['climate'], heat: ['climate', 'switch'], fresh: ['fan', 'switch'],
     fan: ['fan'], plug: ['switch'], cover: ['cover'], lock: ['lock'], cam: ['camera'],
-    toilet: ['switch', 'sensor'], appliance: ['switch', 'sensor', 'media_player'],
+    toilet: ['switch', 'sensor', 'select'], appliance: ['switch', 'sensor', 'media_player'],
     heater: ['water_heater', 'climate', 'switch'], cook: ['switch'], flame: ['binary_sensor', 'sensor'],
     media: ['media_player'], hub: ['switch', 'binary_sensor'], sensor: ['sensor', 'binary_sensor'],
-    panel: ['switch'], bell: ['binary_sensor']
+    panel: ['switch'], bell: ['binary_sensor'],
+    // 清洁
+    vacuum: ['vacuum'], purifier: ['fan', 'switch', 'sensor'], humidifier: ['humidifier', 'fan', 'switch'],
+    leak: ['binary_sensor', 'sensor'],
+    // 厨电
+    airfry: ['switch', 'sensor'], oven: ['switch', 'sensor'], fridge: ['switch', 'sensor', 'binary_sensor'],
+    water_dispenser: ['switch', 'sensor'], wine: ['switch', 'sensor'],
+    // 娱乐
+    speaker: ['media_player'], projector: ['media_player', 'switch'],
+    // 环境
+    plant: ['light', 'switch'], pet: ['switch', 'sensor'], bed: ['cover', 'switch'], presence: ['binary_sensor', 'sensor'],
+    // 安防
+    siren: ['siren', 'switch', 'binary_sensor'],
   };
   /* 底部筛选 chip 可选图标（都是 index.html 里已有的 <symbol>） */
   const ICON_CHOICES = [
@@ -2255,7 +2290,13 @@
     ['i-fan', '风扇'], ['i-plug', '插座'], ['i-cover', '窗帘'], ['i-lock', '门锁'], ['i-cam', '摄像'],
     ['i-toilet', '卫浴'], ['i-media', '影音'], ['i-washer', '家电'], ['i-tap', '热水器'],
     ['i-pot', '烹饪'], ['i-flame', '燃气'], ['i-hub', '网关'], ['i-wave', '传感器'],
-    ['i-panel', '面板'], ['i-bell', '门铃'], ['i-bolt', '用电'], ['i-drop', '湿度'], ['i-user', '家人']
+    ['i-panel', '面板'], ['i-bell', '门铃'], ['i-bolt', '用电'], ['i-drop', '湿度'], ['i-user', '家人'],
+    // 新增
+    ['i-vacuum', '扫地机'], ['i-purifier', '净化器'], ['i-humidifier', '加湿器'], ['i-leak', '水浸'],
+    ['i-airfry', '空气炸锅'], ['i-oven', '烤箱'], ['i-fridge', '冰箱'], ['i-water', '饮水机'],
+    ['i-wine', '酒柜'], ['i-speaker', '音箱'], ['i-projector', '投影'],
+    ['i-plant', '植物'], ['i-pet', '宠物'], ['i-bed', '床'], ['i-presence', '人体'],
+    ['i-siren', '报警'],
   ];
 
   function kindLabel(k) {
@@ -2267,11 +2308,18 @@
   /* 反向：根据实体的 domain 自动推断 kind（Houseplan 式自动落位） */
   const DOMAIN_KIND = {
     light: 'light', climate: 'ac', cover: 'cover', lock: 'lock', camera: 'cam',
-    media_player: 'media', fan: 'fan', water_heater: 'heater', humidifier: 'appliance',
-    vacuum: 'appliance', siren: 'bell', switch: 'plug', sensor: 'sensor', binary_sensor: 'sensor',
+    media_player: 'media', fan: 'fan', water_heater: 'heater',
+    // 清洁
+    humidifier: 'humidifier', vacuum: 'vacuum',
+    // 安防
+    siren: 'siren',
+    // 环境
+    plant: 'plant',
+    // 基础兜底
+    switch: 'plug', sensor: 'sensor', binary_sensor: 'sensor',
     valve: 'appliance', remote: 'media', select: 'panel', number: 'sensor', button: 'panel',
     date: 'sensor', time: 'sensor', text: 'sensor', lawn_mower: 'appliance',
-    event: 'panel'
+    event: 'panel', weather: 'sensor'
   };
 
   function openDeviceEditor(id, preset) {
@@ -2739,10 +2787,26 @@
         <label>上传速度<input id="oUp" value="${ov.netUp || ''}"></label>
       </div>
       <div class="lh-ed-section">
+        <h4>用电 <small class="lh-ed-hint">装「网上国网」集成或你的电表集成；核心 3 个填了就能显示，多填多显</small></h4>
+        <label>本月累计 kWh <input id="pKwhMonth" value="${(ov.power && ov.power.kwhMonth) || ''}" placeholder="如：sensor.state_grid_xxx_month_ele_num"></label>
+        <label>本月电费（元）<input id="pBillMonth" value="${(ov.power && ov.power.billMonth) || ''}"></label>
+        <label>账户余额（元）<input id="pBalance" value="${(ov.power && ov.power.balance) || ''}"></label>
+        <details class="lh-ed-hint" style="margin-top:6px"><summary>更多字段（可选）</summary>
+          <label>今日用电 kWh<input id="pKwhDay" value="${(ov.power && ov.power.kwhDay) || ''}"></label>
+          <label>取数日期<input id="pDayDate" value="${(ov.power && ov.power.dayDate) || ''}"></label>
+          <label>年度累计 kWh<input id="pKwhYear" value="${(ov.power && ov.power.kwhYear) || ''}"></label>
+          <label>年度电费（元）<input id="pCostYear" value="${(ov.power && ov.power.costYear) || ''}"></label>
+          <label>上月用电 kWh<input id="pKwhLM" value="${(ov.power && ov.power.kwhLastMonth) || ''}"></label>
+          <label>上月电费（元）<input id="pCostLM" value="${(ov.power && ov.power.costLastMonth) || ''}"></label>
+          <label>本月峰电 kWh<input id="pPM" value="${(ov.power && ov.power.pMonth) || ''}"></label>
+          <label>本月谷电 kWh<input id="pVM" value="${(ov.power && ov.power.vMonth) || ''}"></label>
+          <label>近30天图表<small class="lh-ed-hint">属性里有 graph 数组的那个 sensor</small><input id="pGraph" value="${(ov.power && ov.power.graph30) || ''}"></label>
+        </details>
+      </div>
+      <div class="lh-ed-section">
         <h4>家人在线 <small class="lh-ed-hint">先在路由器绑手机固定 IP → HA 装 Ping 集成 → 这里填它生成的 binary_sensor.*</small></h4>
         <div id="peopleList">${(ov.people || []).map((p, i) => `
           <div class="lh-ed-person">
-            <input value="${(p.name || '').replace(/"/g, '&quot;')}" data-pf="name" data-pi="${i}" placeholder="姓名">
             <input value="${(p.entity || '').replace(/"/g, '&quot;')}" data-pf="entity" data-pi="${i}" placeholder="binary_sensor 实体">
             <button type="button" class="lh-ed-btn danger" data-pdel="${i}">删</button>
           </div>`).join('')}</div>
@@ -2783,6 +2847,12 @@
       createEntityPicker(inp, { domains: ['camera', 'image'], placeholder: '摄像头实体' }));
     wrap.querySelectorAll('[data-gf="entity"]').forEach((inp) =>
       createEntityPicker(inp, { placeholder: '网关/设备在线状态实体' }));
+    /* 国网用电所有 sensor input 都挂选择器 */
+    ['pKwhMonth', 'pBillMonth', 'pBalance', 'pKwhDay', 'pDayDate',
+     'pKwhYear', 'pCostYear', 'pKwhLM', 'pCostLM', 'pPM', 'pVM', 'pGraph'
+    ].forEach((id) => createEntityPicker($('#' + id, wrap), {
+      domains: ['sensor'], placeholder: 'state_grid / 电表 sensor'
+    }));
 
     // 绑定保存
     $('#ovSave', wrap).onclick = () => {
@@ -2794,6 +2864,23 @@
       });
       ov.netDown = $('#oDown', wrap).value.trim();
       ov.netUp = $('#oUp', wrap).value.trim();
+      /* 国网用电：至少 1 个实体就保存 */
+      const p = {};
+      const $ = (id) => $('#' + id, wrap).value.trim();
+      if ($('pKwhMonth')) p.kwhMonth = $('pKwhMonth');
+      if ($('pBillMonth')) p.billMonth = $('pBillMonth');
+      if ($('pBalance')) p.balance = $('pBalance');
+      if ($('pKwhDay')) p.kwhDay = $('pKwhDay');
+      if ($('pDayDate')) p.dayDate = $('pDayDate');
+      if ($('pKwhYear')) p.kwhYear = $('pKwhYear');
+      if ($('pCostYear')) p.costYear = $('pCostYear');
+      if ($('pKwhLM')) p.kwhLastMonth = $('pKwhLM');
+      if ($('pCostLM')) p.costLastMonth = $('pCostLM');
+      if ($('pPM')) p.pMonth = $('pPM');
+      if ($('pVM')) p.vMonth = $('pVM');
+      if ($('pGraph')) p.graph30 = $('pGraph');
+      if (Object.keys(p).length) ov.power = p;
+      else delete ov.power;
       window.LH.config.weather = cfg.weather;
       window.LH.config.overview = ov;
       markDirty();
@@ -2804,7 +2891,7 @@
     // 家人
     $('#peopleAdd', wrap).onclick = () => {
       if (!ov.people) ov.people = [];
-      ov.people.push({ name: '新家人', entity: '' });
+      ov.people.push({ entity: '' });
       rerenderEditorTab();
     };
     wrap.querySelectorAll('[data-pf]').forEach((inp) => {
