@@ -1615,7 +1615,7 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 }
 .cseg button {
   padding: 5px 9px; font-size: calc(11.5px * var(--fsk)); border: 0; background: none; color: var(--dim);
-  cursor: pointer; font-family: var(--font); white-space: nowrap;
+  cursor: pointer; font-family: var(--font); white-space: nowrap; flex: none;
 }
 .cseg button + button { border-left: 1px solid var(--line-soft); }
 .cseg button.on { background: var(--amber-soft); color: var(--amber-2); }

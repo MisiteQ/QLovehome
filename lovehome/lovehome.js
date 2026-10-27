@@ -1970,7 +1970,7 @@
     }),
 
     /* ✅ 中控面板（参考中控面板设计图：屏幕/音箱/三路按键 三大块）*/
-    '中控|central|smart_panel|hub': (d, eids) => ({
+    '中控|central|smart_panel|hub|智能家庭面板|家庭面板|小爱音箱|小爱Pro': (d, eids) => ({
       always: true, sub: '屏幕 · 音箱 · 三路按键', open: '设置', echo: [{ e: d.entity }],
       groups: [
         { t: '屏幕', items: [
@@ -2322,11 +2322,105 @@
     }),
   };
   function matchDeviceTemplate(d, eids) {
-    if (!d || !d.name) return null;
-    for (const [pattern, fn] of Object.entries(DEVICE_TEMPLATES)) {
-      const re = new RegExp(pattern, 'i');
-      if (re.test(d.name)) { try { return fn(d, eids); } catch (e) { /* 退回通用 */ } }
+    // ① 快速路径：设备名关键字正则匹配
+    if (d && d.name) {
+      for (const [pattern, fn] of Object.entries(DEVICE_TEMPLATES)) {
+        if (new RegExp(pattern, 'i').test(d.name)) {
+          try { return fn(d, eids); } catch (e) { /* 继续 */ }
+        }
+      }
     }
+    // ② Fallback：实体特征推断（设备名会被用户随意改，实体的 domain + friendly_name 更可靠）
+    const inferred = inferTemplateByEntities(eids);
+    if (inferred && DEVICE_TEMPLATES[inferred]) {
+      try { return DEVICE_TEMPLATES[inferred](d, eids); } catch (e) { /* 继续 */ }
+    }
+    return null;
+  }
+
+  /* 根据实体的 domain + friendly_name 关键字组合，推断是哪类设备 → 返回 DEVICE_TEMPLATES 的 key */
+  function inferTemplateByEntities(eids) {
+    const domains = new Set();
+    const fnames = [];
+    eids.forEach((e) => {
+      domains.add(e.split('.')[0]);
+      const s = st(e);
+      if (s) fnames.push(((s.attributes || {}).friendly_name || e).toLowerCase());
+    });
+    const text = fnames.join(' ');
+    const domText = [...domains].join(',');
+
+    // 具体特征优先（检查顺序很重要：先特殊的再通用的）
+    if (domains.has('humidifier')) return '加湿|humidifier|dehumidifier|除湿';
+    if (domains.has('vacuum')) return '扫地|vacuum|robot.*vac|roborock|dreame|ilife|xiaomi.*vac|sweeper|扫拖';
+    if (domains.has('cover')) return '窗帘|幕布|遮阳|cover|curtain|blind|shade';
+    if (domains.has('camera')) return '摄像头|camera|监控|webcam|doorbell|门铃';
+    if (domains.has('water_heater')) return '热水器|water_heater';
+    if (domains.has('lock')) return '门锁|lock|smart_lock|door_lock|cadiz|kaadas|aqara.*lock|roci';
+
+    // 中控面板：volume + mute/mic + display/screen + relay/channel/按键
+    if (/volume|音量/.test(text)
+        && (/mute|禁麦|静音|mic|microphone/.test(text) || domains.has('media_player'))
+        && (/relay|channel|继电器|按键|button/.test(text))) {
+      return '中控|central|smart_panel|hub|智能家庭面板|家庭面板|小爱音箱|小爱Pro';
+    }
+
+    // 安全传感器（烟雾/燃气/水浸 → 跟 motion/presence 同模板）
+    if (domains.has('binary_sensor') || domains.has('sensor')) {
+      if (/smoke|烟雾|gas|燃气|leak|水浸|漏水|water_leak/.test(text)
+          || /motion|人体|presence|入侵|intrusion|pir/.test(text)) {
+        return '烟雾|smoke|燃气|gas|水浸|water.*leak|漏水|人体|motion| presence|入侵|intrusion';
+      }
+    }
+
+    // 马桶
+    if (/seat|座|nozzle|喷头|bidet|除臭/.test(text)
+        && (/水温|座温|water_temp/.test(text) || domains.has('switch'))) {
+      return '马桶|toilet|bidet';
+    }
+    // 浴霸：暖风+吹风+换气 三者有两个以上 + 档位/延时
+    const heaterKeys = ['暖风', '吹风', '换气'].filter((k) => text.includes(k)).length;
+    if (heaterKeys >= 2 && (/档位|gear|level|delay|延时|灯泡/.test(text))) {
+      return '浴霸|bathroom_heater';
+    }
+    // 热水器（非 water_heater domain 情况）
+    if (/heater|热水器|水.*加热/.test(text)) return '热水器|water_heater';
+    // 饮水机
+    if (/water_dispenser|饮水机|TDS|滤芯寿命|净饮/.test(text)) return '饮水机|净饮|water_dispenser|purifier';
+    // 洗衣机：program + remaining/wash/spin 组合
+    if (/program|程序/.test(text) && (/remaining|剩余时间|wash|洗涤|漂洗|spin|脱水|speed/.test(text))) {
+      return '洗衣机|wash|laundry';
+    }
+    // 空气炸锅
+    if (/fryer|air_fryer|空气炸锅|cook_time|烹饪时间/.test(text)) return '空气炸|airfry|air_fryer';
+    // 插排（带计量）
+    if ((/power_consumption|累计电量|electric_power|实时功率|电压|电流/.test(text))
+        && domains.has('switch')) {
+      return '插排|插座|plug|outlet|power_strip';
+    }
+    // 空气净化器
+    if (/purifier|净化器|PM2\.5|PM10|filter|滤芯寿命/.test(text)) return '净化|purifier|air.*purif|mi.*air';
+    // 电饭煲/压力锅
+    if (/rice_cooker|电饭煲|压力|pressure|保温|keep_warm|炖锅/.test(text)) return '电饭|饭煲|电饭堡|pressure_cooker|rice_cooker|电压力锅|炖锅';
+    // 烤箱/蒸箱
+    if (/oven|烤箱|蒸箱|steamer|roaster|烘焙|空气炸/.test(text)) return '烤箱|oven|蒸箱|steamer|roaster|kettle|电水壶';
+    // 冰箱
+    if (/refrigerator|fridge|freezer|冰箱|冷柜/.test(text)) return '冰箱|refrigerator|fridge|freezer|冷柜';
+    // 新风
+    if (/fresh_air|新风|ventilation|hrv|erv|热交换/.test(text)) return '新风|fresh_air|ventilation|hrv|erv|热交换|换气';
+    // 投影仪
+    if (/projector|投影仪|laser|激光电视|beam/.test(text)) return '投影|projector|激光电视|laser.*tv|beam';
+    // 植物灯
+    if (/grow_light|植物灯|种植|hydroponic/.test(text)) return '花盆|plant|grow.*light|植物灯|种植|hydroponic';
+    // 宠物喂食
+    if (/feeder|喂食|宠物|pet|fountain/.test(text)) return '喂食|feeder|宠物|pet|饮水机|water.*fountain';
+    // 电动床
+    if (/adjustable.*bed|电动床|智能床|mattress/.test(text)) return '电动床|智能床|bed|mattress|adjustable.*bed';
+    // 地暖
+    if (/floor.*heat|地暖|暖气片|radiator|供热/.test(text)) return '地暖|暖气片|供热|heating|radiator|floor.*heat';
+    // 音箱/媒体（最后兜底，因为 media_player 太通用）
+    if (domains.has('media_player')) return '音箱|音响|speaker|soundbox|soundbar|sound_bar|电视|television|tv|media_player';
+
     return null;
   }
 
@@ -2367,15 +2461,23 @@
       if (SKIP_DOMAINS.has(dom)) return;
       const at = s.attributes || {};
       let fname = at.friendly_name || eid.split('.')[1] || eid;
-      // ★ 去掉设备名前缀：HA 的 friendly_name 常带 "设备名 - " / "设备名·" 开头
-      // （比如 "米家智能浴霸 - 主卫 浴霸灯泡" → "浴霸灯泡"）
+      // ★ 去掉设备名前缀：HA 的 friendly_name 常带 "设备名 - " / "设备名·" / "设备名 " 开头
+      // 更激进：不仅检查 startsWith，还按常见分隔符分词后检查「第一个词 = 设备名」
       const devName = (d && d.name) || '';
-      if (devName && fname.startsWith(devName)) {
-        fname = fname.slice(devName.length).replace(/^[\s\-_\.··:：]+/, '');
-      }
-      // 再去掉冗余前缀（比如 "主卫 浴霸" 重复出现两次）
-      const shorter = fname.replace(new RegExp('^' + devName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\-_.·:：]+', 'i'), '');
-      if (shorter.length && shorter.length < fname.length) fname = shorter;
+      const stripDevPrefix = (s) => {
+        if (!devName) return s;
+        if (s.startsWith(devName)) {
+          let r = s.slice(devName.length);
+          return r.replace(/^[\s\-_\.···:：·]+/, '');
+        }
+        // 分词匹配：按空格 / · / - 分开，第一个 token 等于设备名就截掉
+        const firstTok = s.split(/[\s\-_···:：]+/)[0];
+        if (firstTok === devName) {
+          return s.slice(firstTok.length).replace(/^[\s\-_\.···:：·]+/, '');
+        }
+        return s;
+      };
+      fname = stripDevPrefix(fname);
       const label = fname.length > 16 ? fname.slice(0, 15) + '…' : fname;
 
       switch (dom) {
