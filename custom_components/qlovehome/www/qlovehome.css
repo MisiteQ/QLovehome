@@ -1831,6 +1831,32 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .trun .tcx { padding: 4px 6px; color: rgba(var(--fg), 0.45); }
 .trun .tcx:hover { color: var(--bad); border-color: rgba(var(--bad), 0.4); }
 
+/* 手动输入分钟数（v300）：手机键盘弹数字，回车即定时 */
+.tman { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.tman .tnum {
+  width: 78px; flex: 0 0 78px;
+  font-family: inherit; font-size: calc(11.5px * var(--fsk));
+  padding: 4px 8px; border-radius: 8px;
+  background: var(--panel); border: 1px solid var(--line-soft); color: var(--text);
+  outline: none; font-variant-numeric: tabular-nums;
+  transition: border-color .15s;
+}
+.tman .tnum::placeholder { color: var(--dim-2); }
+.tman .tnum:focus { border-color: rgba(var(--am), 0.5); }
+.tman .tnum::-webkit-outer-spin-button,
+.tman .tnum::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.tman .tnum[type=number] { -moz-appearance: textfield; appearance: textfield; }
+.tman .th-u { font-size: calc(11px * var(--fsk)); color: var(--dim-2); }
+.tman .tok {
+  font-family: inherit; font-size: calc(11.5px * var(--fsk)); cursor: pointer;
+  padding: 4px 10px; border-radius: 8px;
+  background: none; border: 1px solid var(--line-soft); color: var(--dim);
+  transition: color .15s, border-color .15s, background .15s;
+}
+.tman .tok:hover {
+  color: var(--amber-2); border-color: rgba(var(--am), 0.4); background: var(--amber-soft);
+}
+
 /* ══════════════════════════════════════════════════════════════
  * LoveHome 可视化编辑器（lovehome-editor.js）
  * 独立命名空间 .lh-ed-*，不污染主样式

@@ -120,7 +120,6 @@
     season: ['qlh.season', 'lhSeason'],
     standby: ['qlh.standby', 'lhStandby'],
     uiPref: ['qlh.ui', 'lhUI'],
-    timers: ['qlh.timers', 'lhTimers'],
     airerAt: ['qlh.airerAt', 'lh.airer.at'],
   };
   function uiRead(name) {
@@ -243,28 +242,103 @@
     }
   }
 
-  /* ── 定时 / 倒计时（v192）─────────────────────────────────────────
+  /* ── 定时 / 倒计时（v300）─────────────────────────────────────────
      米家的定时跑在云端（App 里的「智能场景」），HA 侧一个实体都没有 ——
-     全量 775 个实体里只有浴霸有本地「关机延时」。所以这里自己实现：
-     选方向（关 / 开）→ 选时长 → 记结束时间戳 → 到点调 turn_off / turn_on。
-     时间戳存 localStorage，刷新能续上；页面关太久（过期超过 60s）的任务直接丢弃，
-     免得隔天开面板突然把设备关掉。
-     这张卡是**自动追加**的：凡 d.entity 能 turn_on/off 的设备（灯 / 插排 / 通断器 /
-     风扇 / 浴霸 / 空调 / 洗衣机 …）都会带，不用在 gen 脚本里逐个配。 */
-  const TKEY = 'lhTimers';
+     所以这里自己实现：选方向（关 / 开）→ 选时长（或手动输入分钟）→ 到点调
+     turn_off / turn_on。
+     ★ 任务存在 HA 服务器「本集成自身文件夹」的 timers 段，调度也在 HA 后端跑：
+       关掉面板、退出 HA 账号、换电脑都照常执行。
+       localStorage 只留一份镜像供本机显示（打开面板秒看到剩余时间）。 */
+  const TIMER_KEY = 'qlh.timers';       // 本机镜像（缓存，服务器为准）
+  const OLD_TIMER_KEY = 'lhTimers';     // 旧 key，首次读取迁移
   const TDOMS = ['switch', 'light', 'fan', 'cover', 'media_player', 'climate',
                  'water_heater', 'humidifier', 'siren', 'valve'];
   const TOPTS = [15, 30, 60, 120];
-  const THINT = '先选「关 / 开」，再选时长 → 到点自动执行。倒计时存在本机，刷新能续上；' +
-                '关页面太久（超过 1 分钟）的过期任务会直接丢弃。';
+  const THINT = '先选「关 / 开」，再选时长（也可以直接输入分钟数）→ 到点自动执行。' +
+                '定时保存在 HA 服务器上，关掉面板、退出账号也照样执行。';
   function timersOf() {
     try {
-      const raw = uiRead('timers');
+      const raw = localStorage.getItem(TIMER_KEY) || localStorage.getItem(OLD_TIMER_KEY);
       const v = JSON.parse(raw || '{}');
       return (v && typeof v === 'object') ? v : {};
     } catch (e) { return {}; }
   }
-  function saveTimers(t) { uiWrite('timers', JSON.stringify(t)); }
+  function saveTimers(t) {
+    try {
+      localStorage.setItem(TIMER_KEY, JSON.stringify(t));
+      localStorage.removeItem(OLD_TIMER_KEY);
+    } catch (e) { /* 隐私模式忽略 */ }
+  }
+
+  /* ── 定时接口：WS 优先，REST 兜底（任务最终存在 HA 服务器）── */
+  function apiTimerLoad() {
+    if (!haToken()) return Promise.resolve(null);
+    return apiFetch('/api/qlh/timer')
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => (d && d.timers) || {})
+      .catch(() => null);
+  }
+  function apiTimerSet(e, end, act, name) {
+    if (!haToken()) return Promise.resolve(false);
+    return apiFetch('/api/qlh/timer', {
+      method: 'POST', body: JSON.stringify({ entity_id: e, end, act, name: name || '' })
+    }).then((r) => r.ok).catch(() => false);
+  }
+  function apiTimerClear(e) {
+    if (!haToken()) return Promise.resolve(false);
+    return apiFetch('/api/qlh/timer?entity_id=' + encodeURIComponent(e), { method: 'DELETE' })
+      .then((r) => r.ok).catch(() => false);
+  }
+  function serverTimerLoad() {
+    const h = hass();
+    if (h && typeof h.callWS === 'function') {
+      return h.callWS({ type: 'qlovehome/get_timers' })
+        .then((r) => (r && r.timers) || {})
+        .catch(() => apiTimerLoad());
+    }
+    return apiTimerLoad();
+  }
+  function remoteTimerSet(e, end, act, name) {
+    const h = hass();
+    if (h && typeof h.callWS === 'function') {
+      return h.callWS({ type: 'qlovehome/set_timer', entity_id: e, end, act, name: name || '' })
+        .then(() => true).catch(() => apiTimerSet(e, end, act, name));
+    }
+    return apiTimerSet(e, end, act, name);
+  }
+  function remoteTimerClear(e) {
+    const h = hass();
+    if (h && typeof h.callWS === 'function') {
+      return h.callWS({ type: 'qlovehome/clear_timer', entity_id: e })
+        .then(() => true).catch(() => apiTimerClear(e));
+    }
+    return apiTimerClear(e);
+  }
+  /* 和服务器对齐：服务器有就覆盖本机；服务器空而本机有 → 迁移上去（老用户） */
+  let timerSyncAt = 0;
+  function syncTimers(force) {
+    const now = Date.now();
+    if (!force && now - timerSyncAt < 15000) return Promise.resolve();
+    timerSyncAt = now;
+    return serverTimerLoad().then((srv) => {
+      if (srv == null) return;                 // 接口都不可用：保留本机镜像
+      if (Object.keys(srv).length) {
+        saveTimers(srv);
+        paintTimers();
+        return;
+      }
+      const local = timersOf();
+      const alive = Object.keys(local).filter((k) => local[k] && local[k].end > Date.now());
+      if (!alive.length) {
+        if (Object.keys(local).length) { saveTimers({}); paintTimers(); }
+        return;
+      }
+      alive.forEach((e) => {
+        const it = local[e];
+        remoteTimerSet(e, it.end, it.act || 'off', it.n || '');
+      });
+    }).catch(() => { /* 静默 */ });
+  }
   function timerDom(e) { return (e || '').split('.')[0]; }
   function timerOk(d) { return !!d && !!d.entity && TDOMS.indexOf(timerDom(d.entity)) >= 0; }
   function fmtMin(m) {
@@ -275,9 +349,12 @@
     return (m ? m + '分' : '') + (s % 60) + '秒';
   }
   function timerStart(e, act, min, name) {
+    if (!(min > 0)) { toast('先填一个大于 0 的分钟数'); return; }
+    const end = Date.now() + min * 60000;
     const t = timersOf();
-    t[e] = { end: Date.now() + min * 60000, act: act, n: name || '' };
-    saveTimers(t);
+    t[e] = { end: end, act: act, n: name || '' };
+    saveTimers(t);                              // 本机镜像：立刻显示
+    remoteTimerSet(e, end, act, name);          // ★ 真正的任务存到 HA 服务器
     toast((name || '定时') + ' · ' + fmtMin(min) + '后' + (act === 'off' ? '关闭' : '开启'));
     paintTimers();
   }
@@ -285,35 +362,40 @@
     const t = timersOf();
     if (!t[e]) return;
     delete t[e]; saveTimers(t);
+    remoteTimerClear(e);
     toast('已取消定时');
     paintTimers();
   }
-  /** 每秒一次：刷新剩余时间，到点下发；已被手动关掉的就顺手清掉 */
+  /** 每秒一次：刷新剩余时间；到点由 HA 服务器执行，这里只做兜底与本机显示 */
   function tickTimers() {
     const t = timersOf(), keys = Object.keys(t);
-    if (!keys.length) return;
     const now = Date.now();
-    let dirty = false;
-    keys.forEach((e) => {
-      const it = t[e];
-      if (now >= it.end) {
-        delete t[e]; dirty = true;
-        if (now - it.end > 60000) {
-          toast((it.n || e) + ' · 定时任务已过期，已忽略');
+    if (keys.length) {
+      let dirty = false;
+      keys.forEach((e) => {
+        const it = t[e];
+        if (!it) return;
+        if (now >= it.end) {
+          delete t[e]; dirty = true;
+          /* 服务器应该已经执行了；接口暂时不通时本机补一刀（turn_on/off 幂等，重复无害） */
+          if (now - it.end < 300000) {
+            sendControl(timerDom(e), it.act === 'off' ? 'turn_off' : 'turn_on',
+              { entity_id: e }, (it.n || '定时') + ' · ' + (it.act === 'off' ? '关闭' : '开启'));
+          } else {
+            toast((it.n || e) + ' · 定时已结束');
+          }
           return;
         }
-        sendControl(timerDom(e), it.act === 'off' ? 'turn_off' : 'turn_on', { entity_id: e },
-          (it.n || '定时') + ' · ' + (it.act === 'off' ? '关闭' : '开启'));
-        return;
-      }
-      const s = st(e);
-      /* 目标已经达成（要关但已经关了）→ 清掉，免得白跑一趟还占着显示 */
-      if (s && it.act === 'off' && (s.state === 'off' || s.state === 'closed')) {
-        delete t[e]; dirty = true;
-      }
-    });
-    if (dirty) saveTimers(t);
+        /* 目标已经达成（要关但已经关了）→ 清掉本机显示，服务器那条也取消 */
+        const s = st(e);
+        if (s && it.act === 'off' && (s.state === 'off' || s.state === 'closed')) {
+          delete t[e]; dirty = true; remoteTimerClear(e);
+        }
+      });
+      if (dirty) saveTimers(t);
+    }
     paintTimers();
+    if (state.booted) syncTimers(false);        // 低频和服务器对齐（到点后服务器已删除）
   }
   function paintTimers() {
     const t = timersOf();
@@ -344,6 +426,11 @@
         '</div>' +
         '<b class="tval">' + (t ? fmtLeft(t.end - Date.now()) : '未设置') + '</b>' +
         '<button type="button" class="tcx" title="取消定时">✕</button>' +
+      '</div>' +
+      '<div class="tman">' +
+        '<input class="tnum" type="number" inputmode="numeric" min="1" max="1440" step="1" placeholder="分钟">' +
+        '<span class="th-u">分钟</span>' +
+        '<button type="button" class="tok">定时</button>' +
       '</div>';
     box.addEventListener('click', (ev) => {
       const run = box.querySelector('.trun');
@@ -351,10 +438,20 @@
       if (!b || !run) return;
       if (b.classList.contains('tcx')) { timerCancel(e); return; }
       const cur = timersOf()[e];
+      if (b.classList.contains('tok')) {           /* 手动输入分钟数 */
+        const inp = box.querySelector('.tnum');
+        const min = Math.round(Number(inp && inp.value));
+        if (!Number.isFinite(min) || min < 1 || min > 1440) { toast('请输入 1 ~ 1440 之间的分钟数'); return; }
+        const onB = run.querySelector('.tseg button.on');
+        const act = cur ? cur.act : ((onB && onB.dataset.act) || 'off');
+        timerStart(e, act, min, d.name);
+        return;
+      }
       if (b.dataset.act) {
         const act = b.dataset.act;
         if (cur) {                     /* 已经在跑：直接改方向，时间不变 */
           const t2 = timersOf(); t2[e].act = act; saveTimers(t2);
+          remoteTimerSet(e, t2[e].end, act, t2[e].n || '');
           toast('定时改为到点' + (act === 'off' ? '关闭' : '开启'));
           paintTimers(); return;
         }
@@ -366,6 +463,13 @@
         const act = cur ? cur.act : ((onB && onB.dataset.act) || 'off');
         timerStart(e, act, Number(b.dataset.min), d.name);
       }
+    });
+    /* 手动输入框里按回车 = 点「定时」 */
+    box.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter' || !ev.target.closest('.tnum')) return;
+      ev.preventDefault();
+      const tok = box.querySelector('.tok');
+      if (tok) tok.click();
     });
     return box;
   }

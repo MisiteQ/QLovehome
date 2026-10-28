@@ -25,8 +25,11 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.helpers.event import async_track_point_in_utc_time
+from homeassistant.util import dt as dt_util
 
 from .const import (
+    API_TIMER_URL,
     API_UI_URL,
     API_URL,
     DATA_DIR_NAME,
@@ -37,6 +40,9 @@ from .const import (
     LEGACY_STORAGE_DIR,
     PANEL_PATH,
     PANEL_URL,
+    TIMER_CATCHUP_SECONDS,
+    TIMER_EVENT,
+    TIMER_KEY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,6 +51,9 @@ WS_GET_CONFIG = "qlovehome/get_config"
 WS_SAVE_CONFIG = "qlovehome/save_config"
 WS_GET_UI = "qlovehome/get_ui"
 WS_SAVE_UI = "qlovehome/save_ui"
+WS_GET_TIMERS = "qlovehome/get_timers"
+WS_SET_TIMER = "qlovehome/set_timer"
+WS_CLEAR_TIMER = "qlovehome/clear_timer"
 
 
 # ── 存储路径 ────────────────────────────────────────────────
@@ -135,6 +144,36 @@ def _write_ui(hass: HomeAssistant, ui: dict) -> dict:
     return merged
 
 
+# ── 定时 / 倒计时持久化 ─────────────────────────────────────
+# 存在配置文件顶层 timers 段（和 ui / 编辑器配置同一个文件，换电脑跟着走）
+# 结构: { "light.xxx": {"end": 毫秒时间戳, "act": "on"/"off", "n": "名字"} }
+def _read_timers(hass: HomeAssistant) -> dict:
+    timers = _read(hass).get(TIMER_KEY)
+    return timers if isinstance(timers, dict) else {}
+
+
+def _write_timers(hass: HomeAssistant, timers: dict) -> dict:
+    data = _read(hass)
+    data[TIMER_KEY] = timers
+    _write(hass, data)
+    return timers
+
+
+def _save_config_keep_timers(hass: HomeAssistant, cfg: dict) -> dict:
+    """整份保存配置时，timers 段一律以服务器上的实时值为准.
+
+    定时只通过 set_timer / clear_timer 修改；前端保存配置时可能带着一份旧快照，
+    直接照抄会把新设的定时丢掉、或把已执行的又写回来。
+    """
+    merged = dict(cfg)
+    old = _read(hass).get(TIMER_KEY)
+    if isinstance(old, dict) and old:
+        merged[TIMER_KEY] = old
+    else:
+        merged.pop(TIMER_KEY, None)
+    return merged
+
+
 # ── 装机流程 ────────────────────────────────────────────────
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """YAML 层初始化：静态目录 / 接口 / 面板全部在这里就绪。
@@ -147,6 +186,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     _async_register_api(hass)
     _async_register_ws(hass)
     _async_register_panel_later(hass)
+    _async_register_timers_later(hass)
     return True
 
 
@@ -155,6 +195,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_register_static(hass)
     _async_register_api(hass)
     _async_register_ws(hass)
+    _async_register_timers_later(hass)
     await _async_register_panel(hass)
     _LOGGER.info("QLovehome 集成已就绪，配置存放于 %s", _data_path())
     return True
@@ -197,7 +238,15 @@ def _async_register_ws(hass: HomeAssistant) -> None:
     store = hass.data.setdefault(DOMAIN, {})
     if store.get("ws"):
         return
-    for cmd in (ws_get_config, ws_save_config, ws_get_ui, ws_save_ui):
+    for cmd in (
+        ws_get_config,
+        ws_save_config,
+        ws_get_ui,
+        ws_save_ui,
+        ws_get_timers,
+        ws_set_timer,
+        ws_clear_timer,
+    ):
         websocket_api.async_register_command(hass, cmd)
     store["ws"] = True
 
@@ -207,7 +256,7 @@ def _async_register_api(hass: HomeAssistant) -> None:
     store = hass.data.setdefault(DOMAIN, {})
     if store.get("api"):
         return
-    views = [QlhConfigView(hass), QlhUiView(hass)]
+    views = [QlhConfigView(hass), QlhUiView(hass), QlhTimerView(hass)]
     for view in views:
         hass.http.register_view(view)
     store["api"] = True
@@ -249,6 +298,129 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         )
 
 
+# ── 定时调度（跑在 HA 服务器上，关面板 / 退出账号照常执行）──
+@callback
+def _async_register_timers_later(hass: HomeAssistant) -> None:
+    """HA 启动完成后恢复所有定时任务（只挂一次）."""
+    store = hass.data.setdefault(DOMAIN, {})
+    if store.get("timers_hook"):
+        return
+    store["timers_hook"] = True
+
+    async def _restore(_event=None) -> None:
+        try:
+            await _async_restore_timers(hass)
+        except Exception:  # noqa: BLE001 - 恢复失败不该拖垮集成
+            _LOGGER.exception("恢复 QLovehome 定时任务失败")
+
+    if hass.is_running:
+        hass.async_create_task(_restore())
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _restore)
+
+
+@callback
+def _schedule_timer(hass: HomeAssistant, entity_id: str, item: dict) -> None:
+    """把一条定时挂到事件循环（同一实体只保留一个）."""
+    store = hass.data.setdefault(DOMAIN, {})
+    unsubs = store.setdefault("timer_unsub", {})
+    _cancel_timer(hass, entity_id)
+
+    try:
+        end = float(item.get("end")) / 1000.0
+    except (TypeError, ValueError):
+        return
+
+    @callback
+    def _on_time(_now) -> None:
+        unsubs.pop(entity_id, None)
+        hass.async_create_task(_async_fire_timer(hass, entity_id, dict(item)))
+
+    unsubs[entity_id] = async_track_point_in_utc_time(
+        hass, _on_time, dt_util.utc_from_timestamp(end)
+    )
+
+
+@callback
+def _cancel_timer(hass: HomeAssistant, entity_id: str) -> None:
+    store = hass.data.get(DOMAIN) or {}
+    unsubs = store.get("timer_unsub") or {}
+    unsub = unsubs.pop(entity_id, None)
+    if unsub:
+        unsub()
+
+
+async def _async_fire_timer(hass: HomeAssistant, entity_id: str, item: dict) -> None:
+    """到点执行：调 turn_on / turn_off，然后把任务从服务器配置里删掉."""
+    act = item.get("act") or "off"
+    name = item.get("n") or entity_id
+    state = hass.states.get(entity_id)
+    already = bool(state and (
+        (act == "off" and state.state in ("off", "closed"))
+        or (act == "on" and state.state in ("on", "open"))
+    ))
+    if not already:
+        domain, service = entity_id.split(".", 1)[0], "turn_on" if act == "on" else "turn_off"
+        if not hass.services.has_service(domain, service):
+            domain, service = "homeassistant", service
+        try:
+            await hass.services.async_call(
+                domain, service, {"entity_id": entity_id}, blocking=False
+            )
+            _LOGGER.info("QLovehome 定时执行: %s · %s", name, "开启" if act == "on" else "关闭")
+        except Exception:  # noqa: BLE001 - 单条失败不影响调度
+            _LOGGER.exception("QLovehome 定时执行失败: %s", entity_id)
+
+    def _drop() -> dict:
+        timers = _read_timers(hass)
+        timers.pop(entity_id, None)
+        return _write_timers(hass, timers)
+
+    try:
+        await hass.async_add_executor_job(_drop)
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("清理已执行的定时失败: %s", entity_id)
+
+    hass.bus.async_fire(
+        TIMER_EVENT, {"entity_id": entity_id, "act": act, "name": name}
+    )
+
+
+async def _async_restore_timers(hass: HomeAssistant) -> None:
+    """HA 启动 / 集成加载时把存下来的定时重新挂上.
+
+    HA 停机期间已经到点的：12 小时内补执行（免得重启丢掉），更久的丢弃。
+    """
+    timers = await hass.async_add_executor_job(_read_timers, hass)
+    if not timers:
+        return
+
+    now = dt_util.utcnow().timestamp()
+    keep: dict = {}
+    for entity_id, item in list(timers.items()):
+        if not isinstance(item, dict):
+            continue
+        try:
+            end = float(item.get("end")) / 1000.0
+        except (TypeError, ValueError):
+            continue
+        if end <= now:
+            if now - end <= TIMER_CATCHUP_SECONDS:
+                await _async_fire_timer(hass, entity_id, dict(item))
+            else:
+                _LOGGER.info("QLovehome 定时早已过期，丢弃: %s", entity_id)
+            continue
+        keep[entity_id] = item
+        _schedule_timer(hass, entity_id, item)
+
+    def _sync() -> None:
+        _write_timers(hass, keep)
+
+    await hass.async_add_executor_job(_sync)
+    if keep:
+        _LOGGER.info("QLovehome 已恢复 %s 个定时任务", len(keep))
+
+
 # ── WebSocket API ───────────────────────────────────────────
 @websocket_api.websocket_command({vol.Required("type"): WS_GET_CONFIG})
 @websocket_api.async_response
@@ -263,8 +435,9 @@ async def ws_get_config(hass, connection, msg):
 )
 @websocket_api.async_response
 async def ws_save_config(hass, connection, msg):
-    """前端保存完整配置."""
-    await hass.async_add_executor_job(_write, hass, msg["config"])
+    """前端保存完整配置（保留服务器上正在跑的定时）."""
+    cfg = _save_config_keep_timers(hass, msg["config"])
+    await hass.async_add_executor_job(_write, hass, cfg)
     connection.send_result(msg["id"])
 
 
@@ -284,6 +457,63 @@ async def ws_save_ui(hass, connection, msg):
     """前端保存界面设置（只更新 ui 段）."""
     merged = await hass.async_add_executor_job(_write_ui, hass, msg["ui"])
     connection.send_result(msg["id"], {"ui": merged})
+
+
+@websocket_api.websocket_command({vol.Required("type"): WS_GET_TIMERS})
+@websocket_api.async_response
+async def ws_get_timers(hass, connection, msg):
+    """前端拉取服务器上的定时任务."""
+    timers = await hass.async_add_executor_job(_read_timers, hass)
+    connection.send_result(msg["id"], {"timers": timers})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_SET_TIMER,
+        vol.Required("entity_id"): str,
+        vol.Required("end"): vol.Coerce(float),
+        vol.Required("act"): vol.In(["on", "off"]),
+        vol.Optional("name", default=""): str,
+    }
+)
+@websocket_api.async_response
+async def ws_set_timer(hass, connection, msg):
+    """设置 / 覆盖一条定时（存服务器 + 立即挂调度）."""
+    entity_id = msg["entity_id"]
+    item = {
+        "end": int(msg["end"]),
+        "act": msg["act"],
+        "n": msg.get("name") or "",
+    }
+
+    def _save() -> dict:
+        timers = _read_timers(hass)
+        timers[entity_id] = item
+        return _write_timers(hass, timers)
+
+    timers = await hass.async_add_executor_job(_save)
+    _schedule_timer(hass, entity_id, item)
+    hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, **item})
+    connection.send_result(msg["id"], {"timers": timers})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): WS_CLEAR_TIMER, vol.Required("entity_id"): str}
+)
+@websocket_api.async_response
+async def ws_clear_timer(hass, connection, msg):
+    """取消一条定时."""
+    entity_id = msg["entity_id"]
+
+    def _drop() -> dict:
+        timers = _read_timers(hass)
+        timers.pop(entity_id, None)
+        return _write_timers(hass, timers)
+
+    timers = await hass.async_add_executor_job(_drop)
+    _cancel_timer(hass, entity_id)
+    hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, "act": None})
+    connection.send_result(msg["id"], {"timers": timers})
 
 
 # ── REST 兜底（前端拿不到 hass 对象时用）────────────────────
@@ -317,6 +547,7 @@ class QlhConfigView(_QlhBaseView):
         cfg = body.get("config")
         if not isinstance(cfg, dict):
             return self.json({"error": "config must be an object"}, status_code=400)
+        cfg = _save_config_keep_timers(self.hass, cfg)
         await self.hass.async_add_executor_job(_write, self.hass, cfg)
         return self.json({"ok": True})
 
@@ -337,3 +568,54 @@ class QlhUiView(_QlhBaseView):
             return self.json({"error": "ui must be an object"}, status_code=400)
         merged = await self.hass.async_add_executor_job(_write_ui, self.hass, ui)
         return self.json({"ok": True, "ui": merged})
+
+
+class QlhTimerView(_QlhBaseView):
+    """定时 / 倒计时的 REST 兜底（前端拿不到 hass 对象时用）."""
+
+    url = API_TIMER_URL
+    name = "api:qlh:timer"
+    cors_allowed = True
+
+    async def get(self, request):
+        timers = await self.hass.async_add_executor_job(_read_timers, self.hass)
+        return self.json({"timers": timers})
+
+    async def post(self, request):
+        body = await self._body(request)
+        entity_id = body.get("entity_id")
+        if not isinstance(entity_id, str) or "." not in entity_id:
+            return self.json({"error": "entity_id required"}, status_code=400)
+        act = body.get("act")
+        if act not in ("on", "off"):
+            return self.json({"error": "act must be on/off"}, status_code=400)
+        try:
+            end = int(float(body.get("end")))
+        except (TypeError, ValueError):
+            return self.json({"error": "end must be epoch ms"}, status_code=400)
+        item = {"end": end, "act": act, "n": str(body.get("name") or "")}
+
+        def _save() -> dict:
+            timers = _read_timers(self.hass)
+            timers[entity_id] = item
+            return _write_timers(self.hass, timers)
+
+        timers = await self.hass.async_add_executor_job(_save)
+        _schedule_timer(self.hass, entity_id, item)
+        self.hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, **item})
+        return self.json({"ok": True, "timers": timers})
+
+    async def delete(self, request):
+        entity_id = (request.query.get("entity_id") or "").strip()
+        if "." not in entity_id:
+            return self.json({"error": "entity_id required"}, status_code=400)
+
+        def _drop() -> dict:
+            timers = _read_timers(self.hass)
+            timers.pop(entity_id, None)
+            return _write_timers(self.hass, timers)
+
+        timers = await self.hass.async_add_executor_job(_drop)
+        _cancel_timer(self.hass, entity_id)
+        self.hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, "act": None})
+        return self.json({"ok": True, "timers": timers})
