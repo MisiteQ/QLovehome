@@ -5920,29 +5920,72 @@
       if (!msr) return null;
       const drawer = msr.querySelector('ha-drawer');
       const drawerSR = drawer && drawer.shadowRoot;
-      const panel = msr.querySelector('ha-panel-lovelace');
-      let rootSR = null;
-      if (panel && panel.shadowRoot) {
-        const root = panel.shadowRoot.querySelector('hui-root');
-        rootSR = root && root.shadowRoot;
-      }
-      return { msr, drawerSR, rootSR };
+      return { msr, drawerSR };
     } catch (e) { return null; }
+  }
+  /* 顶栏可能在好几层 shadow DOM 里（Lovelace 的 .header / 内置面板的 ha-top-app-bar），
+     不同版本、不同打开方式都不一样 —— 所以扫描所有能碰到的根节点，每个都注入一遍。
+     根节点列表缓存 4 秒，避免 2 秒轮询时反复扫整棵 HA DOM。 */
+  const HA_SHELL_TAGS = 'home-assistant, home-assistant-main, ha-drawer, ha-sidebar, ' +
+    'ha-panel-lovelace, hui-root, ha-top-app-bar, ha-panel-iframe, ha-panel-custom';
+  let haRootCache = null, haRootAt = 0;
+  function haRoots() {
+    const now = Date.now();
+    if (haRootCache && now - haRootAt < 4000) {
+      let ok = true;
+      for (const r of haRootCache) {
+        if (r.nodeType === 11 && (!r.host || !r.host.isConnected)) { ok = false; break; }
+      }
+      if (ok) return haRootCache;
+    }
+    const out = [];
+    try {
+      const doc = window.parent.document;
+      out.push(doc);
+      const queue = [doc];
+      let guard = 0;
+      while (queue.length && guard++ < 80) {
+        const root = queue.shift();
+        const hosts = root.querySelectorAll ? root.querySelectorAll(HA_SHELL_TAGS) : [];
+        hosts.forEach((h) => {
+          if (!h.shadowRoot) return;
+          out.push(h.shadowRoot);
+          queue.push(h.shadowRoot);
+        });
+      }
+    } catch (e) { /* 跨域 / 异常就不注入 */ }
+    haRootCache = out; haRootAt = now;
+    return out;
   }
   function haInject(root, id, css, on) {
     if (!root) return;
-    let s = root.getElementById(id);
+    const get = root.getElementById
+      ? (i) => root.getElementById(i)
+      : (i) => root.querySelector('#' + i);
+    let s = get(id);
     if (!s) {
       if (!on) return;
       s = document.createElement('style');
       s.id = id;
-      root.appendChild(s);
+      const host = root.nodeType === 9 ? (root.head || root.documentElement) : root;
+      host.appendChild(s);
     }
     const next = on ? css : '';
     if (s.textContent !== next) s.textContent = next;
   }
   function applyHaUI() {
     const p = uiPref();
+    /* 顶栏：三种写法都盖一遍（老 .header / 新版 ha-top-app-bar / app-header） */
+    const topCss = '.header{display:none !important}' +
+      'ha-top-app-bar{display:none !important}' +
+      'app-header{display:none !important}';
+    const padCss = '.app-content{padding-top:0 !important}' +
+      'hui-view-container{padding-top:0 !important}';
+    const hideTop = p.haTop === false;
+    haRoots().forEach((root) => {
+      haInject(root, 'lh-ha-top-css', topCss, hideTop);
+      haInject(root, 'lh-ha-top-pad', padCss, hideTop);
+    });
     const h = haShell();
     if (!h) return false;
     // 光 display:none 不够：占位是 .app-content 的 padding-left 和
@@ -5954,8 +5997,6 @@
     haInject(h.drawerSR, 'lh-ha-side-pad',
       '.app-content{padding-left:0 !important}.sidebar-shell{display:none !important}',
       p.haSide === false);
-    haInject(h.rootSR, 'lh-ha-top-css', '.header{display:none !important}', p.haTop === false);
-    haInject(h.rootSR, 'lh-ha-top-pad', 'hui-view-container{padding-top:0 !important}', p.haTop === false);
     return true;
   }
 
