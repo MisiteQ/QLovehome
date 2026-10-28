@@ -88,9 +88,12 @@
     }
     return apiCfgLoad();
   }
-  /* 服务器空文件 = 还没配置过 → null */
+  /* 服务器空文件 = 还没配置过 → null。
+     注意：服务器文件里可能只剩 timers 段（编辑器「重置为模板」会清空配置），
+     这种情况也算没配置过，要回落到模板，不能拿 timers 当有效配置。 */
   function nonEmptyCfg(c) {
-    return (c && typeof c === 'object' && Object.keys(c).length) ? c : null;
+    if (!c || typeof c !== 'object') return null;
+    return CFG_SECTIONS.some((k) => c[k] != null) ? c : null;
   }
   function apiCfgLoad() {
     if (!haToken()) return Promise.resolve(undefined);

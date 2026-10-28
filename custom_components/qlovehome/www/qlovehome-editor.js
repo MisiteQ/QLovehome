@@ -132,8 +132,10 @@
     const ok = (cfg) => {
       serverReady = true;
       storageMode = 'server';
-      // null = 服务器已连接但还没有配置（用模板默认值）
-      return (cfg && typeof cfg === 'object' && Object.keys(cfg).length) ? cfg : null;
+      // null = 服务器已连接但还没有配置（用模板默认值）。
+      // 只剩 timers 段时也算没配置（定时是独立段，不属于户型配置）
+      if (!cfg || typeof cfg !== 'object') return null;
+      return CONFIG_SECTIONS.some((k) => cfg[k] != null) ? cfg : null;
     };
     if (hass && typeof hass.callWS === 'function') {
       return hass.callWS({ type: 'qlovehome/get_config' })
@@ -3038,7 +3040,7 @@
       </div>
       <div class="lh-ed-section">
         <button class="lh-ed-btn danger" id="dbReset" type="button">⚠ 重置为模板默认值</button>
-        <p class="hint">清除全部自定义配置（服务器模式下会同时清空 /config/lovehome/config.json），恢复到模板。</p>
+        <p class="hint">清除全部自定义配置（服务器模式下会同时清空 HA 里的 qlh/qlh-config.json），恢复到默认模板：4 个房间 + 每房一盏示例灯。</p>
       </div>
       <div class="lh-ed-section">
         <b>当前配置统计</b>
