@@ -3040,7 +3040,7 @@
       </div>
       <div class="lh-ed-section">
         <button class="lh-ed-btn danger" id="dbReset" type="button">⚠ 重置为模板默认值</button>
-        <p class="hint">清除全部自定义配置（服务器模式下会同时清空 HA 里的 qlh/qlh-config.json），恢复到默认模板：4 个房间 + 每房一盏示例灯。</p>
+        <p class="hint">清除全部自定义配置（服务器模式下会同时清空 HA 里的 qlh/qlh-config.json），恢复到默认模板：6 个房间（客厅 / 厨房 / 过道 / 主卧 / 卫生间 / 次卧）+ 每房一盏示例灯。</p>
       </div>
       <div class="lh-ed-section">
         <b>当前配置统计</b>
