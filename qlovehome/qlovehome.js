@@ -4642,14 +4642,20 @@
         点开看要装什么加载项（集成）、填哪个控件（实体）。</p>
       <div class="set-help-list">
         <details class="set-help" open>
-          <summary>天气 · 用什么加载项、地址怎么填</summary>
+          <summary>天气 · 用什么集成、实体怎么选</summary>
           <ol>
-            <li><b>加载项</b>：HA 自带的 <b>Met.no</b>（免 Key）；国内推荐<b>和风天气 QWeather</b>（注册免费 Key）、
-              <b>OpenWeatherMap</b>、<b>AccuWeather</b>。装法：<code>设置 → 设备与服务 → 添加集成</code>。</li>
-            <li><b>控件</b>：集成会生成一个 <code>weather.*</code> 实体，如 <code>weather.forecast_home</code>、
-              <code>weather.hefeng</code>、<code>weather.openweathermap</code>。</li>
-            <li><b>怎么填</b>：编辑器 →「概览 · 家人 · 网关」→ 天气 → <b>天气实体</b>，点输入框弹出实体选择器，
-              选 <code>weather</code> 域那一条。<b>这里填实体 ID，不填网址、不填 Key</b>（Key 在添加集成时填）。</li>
+            <li><b>集成</b>：
+              <ul>
+                <li><b>⭐ HAOS 官方推荐 Met.no</b>（挪威气象局，免 Key，设置 → 设备与服务 → 添加集成 → 搜 Met.no），
+                  数据含温度/湿度/风速/气压/降水/云量/能见度，轻便无配额。</li>
+                <li>国内数据更全：<b>和风天气 QWeather</b>（注册免费 Key，含体感温度/空气质量/生活指数）、
+                  <b>OpenWeatherMap</b>、<b>AccuWeather</b>。</li>
+                <li>本面板优先读实体自带的 <code>apparent_temperature</code>、<code>humidity</code>、
+                  <code>wind_speed</code>、<code>pressure</code> 等字段；没有（如 Met.no 不直接给体感）才用公式估算。</li>
+              </ul>
+            </li>
+            <li><b>怎么选</b>：编辑器 →「概览 · 家人 · 网关」→ 天气 → <b>天气实体</b>，点输入框弹出实体选择器，
+              选 <code>weather</code> 域那一条（如 <code>weather.forecast_home</code>）。<b>只填实体 ID，不填网址、不填 Key</b>。</li>
             <li><b>室内温度 / 湿度</b>（可选）：留空就用天气实体自带的温度；填了 <code>sensor.*</code>
               （如 <code>sensor.living_temperature</code>）时，房间里配了温湿度设备就优先用房间平均值。</li>
           </ol>
@@ -5142,7 +5148,7 @@
     const sunA = (sunS && sunS.attributes) || {};
     const tags = [];
     const ap = apparent(a);
-    if (ap != null) tags.push(['体感（估）', Math.round(ap) + '°']);
+    if (ap != null) tags.push([ap.estimated ? '体感（估）' : '体感', Math.round(ap.value) + '°']);
     if (a.humidity != null) tags.push(['湿度', Math.round(a.humidity) + '%']);
     if (a.wind_speed != null) tags.push(['风速', Math.round(a.wind_speed) + ' km/h']);
     if (a.pressure != null) tags.push(['气压', Math.round(a.pressure) + ' hPa']);
@@ -5321,16 +5327,18 @@
       $('#wTemp').innerHTML = a.temperature != null
         ? dsegNum(Math.round(a.temperature) + '°') : '—';
       $('#wDesc').textContent = LABEL[we.state] || we.state;
-      /* 体感：met.no 那个实体压根没有 apparent_temperature 属性，一直显示「—」。
-         所以自己按「气温 + 相对湿度 + 风速」估一个（澳大利亚气象局的简化式
-         AT ≈ Ta + 0.33·e − 0.70·ws − 4.0，e 是水汽压 hPa，ws 是风速 m/s）。 */
+      /* 体感：优先用 weather 实体自带的 apparent_temperature（AccuWeather / 和风 / OWM 等），
+         没有（如 met.no）才按「气温 + 相对湿度 + 风速」估算。 */
       const ap = apparent(a);
+      const apStr = ap == null ? '—'
+        : (ap.estimated ? '<i class="u">≈</i>' : '') + dsegNum(Math.round(ap.value) + '°');
       $('#wRange').innerHTML = '湿度 ' +
         (a.humidity != null ? dsegNum(a.humidity) + '<i class="u">%</i>' : '—') +
-        ' · 体感 ' +
-        (ap == null ? '—' : '<i class="u">≈</i>' + dsegNum(Math.round(ap) + '°'));
-      /* ≈ 表示这是估算值（met.no 不直接给体感），鼠标悬停能看到说明 */
-      $('#wRange').title = '湿度与风速来自 met.no；体感按「气温 + 湿度 + 风速」估算，非官方数据';
+        ' · 体感 ' + apStr;
+      /* estimated 为 true 时 ≈ 表示估算值；实体自带就直接显示数值 */
+      $('#wRange').title = ap && ap.estimated
+        ? '体感按「气温 + 湿度 + 风速」估算（实体未提供 apparent_temperature）'
+        : '体感来自 weather 实体的 apparent_temperature';
     } else {
       $('#wTemp').textContent = '—';
       $('#wDesc').textContent = '待接入';
@@ -5684,10 +5692,13 @@
     });
   }
 
-  /* 体感温度估算：weather 实体（met.no）没有 apparent_temperature，只能自己算。
-     简化式 AT ≈ Ta + 0.33·e − 0.70·ws − 4.0（e 水汽压 hPa，ws 10m 高风速 m/s），
-     高温时偏保守（不算日照），日常够用；缺湿度或气温就返回 null，界面显示「—」。 */
+  /* 体感温度：优先用 weather 实体自带的 apparent_temperature（AccuWeather / 和风 / OWM 等）；
+     没有（如 met.no）才按澳大利亚气象局简化式估算 AT ≈ Ta + 0.33·e − 0.70·ws − 4.0。
+     缺气温就返回 null，界面显示「—」。
+     返回值 { value, estimated }：estimated 为 true 时 UI 显示 ≈。 */
   function apparent(a) {
+    const at = a.apparent_temperature;
+    if (at != null) return { value: at, estimated: false };
     const t = a.temperature, rh = a.humidity;
     if (t == null || rh == null) return null;
     let ws = 0;                                  // m/s
@@ -5698,7 +5709,7 @@
           : a.wind_speed / 3.6;                  // 默认 km/h
     }
     const e = (rh / 100) * 6.105 * Math.exp(17.27 * t / (237.7 + t));
-    return t + 0.33 * e - 0.70 * ws - 4.0;
+    return { value: t + 0.33 * e - 0.70 * ws - 4.0, estimated: true };
   }
 
   /* ── 主题：默认跟随 sun.sun 的日出日落 ── */

@@ -2881,7 +2881,7 @@
 
     wrap.innerHTML = `
       <div class="lh-ed-section">
-        <h4>天气 <small class="lh-ed-hint">装 Met.no / 和风天气集成，这里填 weather.* 实体 ID；用电 kWh 填 sensor.*；温湿度可选</small></h4>
+        <h4>天气 <small class="lh-ed-hint">装 Met.no（HAOS 官方推荐，免 Key）/ 和风天气等集成，这里填 weather.* 实体 ID；用电 kWh 填 sensor.*；温湿度可选</small></h4>
         <label>天气实体<input id="wEntity" value="${w.entity || ''}" placeholder="如：weather.forecast_home"></label>
         <label>室内温度传感器<input id="wTemp" value="${w.temp || ''}"></label>
         <label>室内湿度传感器<input id="wHum" value="${w.hum || ''}"></label>
