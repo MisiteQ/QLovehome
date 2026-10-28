@@ -21,7 +21,9 @@ AUDIT_FILE = DATA_DIR / "qlh-audit.log"
 AUDIT_MAX_BYTES = 1_000_000
 AUDIT_MAX_ENTRIES = 2000
 
-# 版本号：从仓库根 manifest.json 读（Add-on 里没有，用硬编码兜底）
+# 版本号：优先读 server/manifest.json（Dockerfile 已 COPY 进容器），
+# 开发环境回落到 custom_components/qlovehome/manifest.json，
+# 最后兜底硬编码版本。
 _VERSION_CACHE: str | None = None
 
 
@@ -29,11 +31,13 @@ def read_version() -> str:
     global _VERSION_CACHE
     if _VERSION_CACHE:
         return _VERSION_CACHE
-    # 尝试从仓库根 manifest.json 读（开发环境）
+    # 按优先级依次尝试：Add-on 容器内的 manifest.json → 开发环境两个位置 → 硬编码兜底
     try:
+        here = Path(__file__).resolve().parent
         for candidate in [
-            Path(__file__).resolve().parent.parent.parent / "custom_components" / "qlovehome" / "manifest.json",
-            Path(__file__).resolve().parent.parent / "manifest.json",
+            here / "manifest.json",                              # ✅ Dockerfile 已 COPY 到 server/manifest.json
+            here.parent.parent / "custom_components" / "qlovehome" / "manifest.json",
+            here.parent / "manifest.json",
         ]:
             if candidate.exists():
                 data = json.loads(candidate.read_text(encoding="utf-8"))
