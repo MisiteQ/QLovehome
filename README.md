@@ -1,4 +1,4 @@
-# 🏠 QLoveHome · 全屋大屏
+# 🏠 QLovehome · 全屋大屏
 
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.6%2B-blue.svg)](https://www.home-assistant.io/)
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
@@ -13,7 +13,7 @@
 
 ## 💬 写在前面
 
-QLoveHome（**其爱家** 哈哈哈）是怎么来的？
+QLovehome（**其爱家** 哈哈哈）是怎么来的？
 
 > 新房子装修（开发商的精装房，几乎没啥装修的）之后，有几个灯的开关我老婆说不太好按，让我给她弄个方便操作的方式。当时没有接触过 HAOS，从淘宝上搜了几个蓝牙的还有那种"机器小手指头"的，但都不好用。
 >
@@ -23,7 +23,7 @@ QLoveHome（**其爱家** 哈哈哈）是怎么来的？
 >
 > 头几天在肥牛群里和群友交流，有人推荐了一个仪表盘我挺喜欢的。刚好最近 AI 都很火，我就尝试让 AI 给我布置了一个基础的，发现嘿，比我自己弄好多了！然后就让 AI 参照群友推荐的基础上给我布置了一个——不过这个是 AI 纯代码写出来的，和原来那个可能就在样式上有些相似，其他的都是现写的代码（我自己弄不明白 😅）。
 >
-> 发群里让大伙看，有人提出是不是可以弄成模板，所以就有了现在这个 QLoveHome。是一个基础模板，可以手动设置自己家的户型，也可以直接导入平面图。
+> 发群里让大伙看，有人提出是不是可以弄成模板，所以就有了现在这个 QLovehome。是一个基础模板，可以手动设置自己家的户型，也可以直接导入平面图。
 >
 > **共享给大家，试试看吧，不会的交给 AI，一句话让他给你布置，哈哈哈！** 🎉
 
@@ -71,31 +71,31 @@ v1.0.0 的 `__init__.py` 在 HAOS 上 setup 会报错（`panel_custom` API 签�
 1. **HACS → 集成 → 右上角 ⋮ → 自定义存储库**
 2. URL 填：`https://github.com/MisiteQ/QLovehome`
 3. 类别选：**集成**
-4. 搜索 **QLoveHome** → 安装 → 重启 HA
-5. **设置 → 设备与服务 → 添加集成 → QLoveHome**
-   - 如果侧边栏出现 **LoveHome** 入口 → 点进去就是（自动注册了 iframe panel）
+4. 搜索 **QLovehome** → 安装 → 重启 HA
+5. **设置 → 设备与服务 → 添加集成 → QLovehome**
+   - 侧边栏自动出现 **QLovehome** 入口 → 点进去就是
    - 如果没出现 → Dashboard 添加「网页卡片（iframe）」→ 地址：
      ```
-     /api/lovelace/lovehome/
+     /qlovehome/www/index.html
      ```
 
 ### 方式二：纯 iframe（最简）
 
 ```bash
 # 复制前端文件到 HA www 目录
-cp -r custom_components/lovehome/www/ /config/www/lovehome/
+cp -r custom_components/qlovehome/www/ /config/www/qlovehome/
 ```
 
 Dashboard → 网页卡片（iframe）→ 地址：
 ```
-/local/lovehome/index.html
+/local/qlovehome/index.html
 ```
 
 ### 方式三：手动复制集成
 
 ```bash
 # 复制整个集成目录
-cp -r custom_components/lovehome/ /config/custom_components/
+cp -r custom_components/qlovehome/ /config/custom_components/
 # 重启 HA
 ```
 
@@ -116,14 +116,14 @@ cp -r custom_components/lovehome/ /config/custom_components/
 
 > 已经绑定过的实体会自动灰掉避免重复。超过 30% 设备实体不存在时 tab 头会显示黄色告警。
 
-### 进阶：改 gen_lovehome_data.py（适合大量设备 / 自定义房间名）
+### 进阶：改 gen_qlovehome_data.py（适合大量设备 / 自定义房间名）
 
 ```bash
-# 1. 改 gen_lovehome_data.py 里的实体 ID 和房间
+# 1. 改 gen_qlovehome_data.py 里的实体 ID 和房间
 # 2. 生成数据层
-python gen_lovehome_data.py
+python gen_qlovehome_data.py
 
-# 3. 把生成的 lovehome-data.js 传到 /config/www/lovehome/
+# 3. 把生成的 qlovehome-data.js 传到 /config/www/qlovehome/
 # 4. index.html 里的 ?v=N 加 1（浏览器缓存）
 ```
 
@@ -168,7 +168,7 @@ QLovehome/
 ├── .gitignore                        # Git 忽略规则
 ├── .hacsignore                       # HACS 下载包过滤
 │
-├── custom_components/lovehome/       # ⭐ HA 自定义集成
+├── custom_components/qlovehome/       # ⭐ HA 自定义集成
 │   ├── __init__.py                    # integration 注册
 │   ├── config_flow.py                 # HA 配置向导
 │   ├── const.py                       # 常量
@@ -177,16 +177,16 @@ QLovehome/
 │   ├── translations/                  # 多语言（en / zh-Hans）
 │   └── www/                           # 前端静态文件（HACS 部署用）
 │       ├── index.html
-│       ├── lovehome.js                # 主界面 + 几何算法
-│       ├── lovehome-editor.js         # 可视化编辑器
-│       ├── lovehome.css               # 全部样式 + 四季主题
-│       ├── lovehome-data.js           # 数据层（gen 脚本生成）
+│       ├── qlovehome.js                # 主界面 + 几何算法
+│       ├── qlovehome-editor.js         # 可视化编辑器
+│       ├── qlovehome.css               # 全部样式 + 四季主题
+│       ├── qlovehome-data.js           # 数据层（gen 脚本生成）
 │       ├── QLovehome.png              # 项目图标
 │       └── assets/                    # 背景图（bg-day / bg-night / plan-real）
 │
-├── lovehome/                          # 前端源码（开发用，同步到 www/）
+├── qlovehome/                        # 前端源码（开发用，同步到 www/）
 │
-├── gen_lovehome_data.py               # ⭐ 数据生成器（改实体 ID 跑这个）
+├── gen_qlovehome_data.py               # ⭐ 数据生成器（改实体 ID 跑这个）
 ├── extract_rooms.py                   # 从标注图提取房间多边形
 ├── calib_real.py                      # 现实风底板校准
 ├── calib_real.json                    # 校准输出
@@ -210,10 +210,10 @@ QLovehome/
 
 ```bash
 # 本地静态服务器
-py -m http.server 8765 --directory lovehome/
+py -m http.server 8765 --directory qlovehome/
 
 # 改完同步到 custom_components
-copy lovehome\. custom_components\lovehome\www\ -Recurse
+copy qlovehome\. custom_components\qlovehome\www\ -Recurse
 
 # CI 自动校验：Python 语法 · JS 语法 · manifest.json · HACS Action
 ```
@@ -235,9 +235,9 @@ copy lovehome\. custom_components\lovehome\www\ -Recurse
 
 | 现象 | 原因 | 解决 |
 |---|---|---|
-| 🆕 **Error setting up entry for lovehome** | v1.0.0 的 panel_custom API 签名在 HA 2024.6+ 不兼容 | 升级到 **v1.0.1**（已修复） |
-| 侧边栏没出现 LoveHome | panel 注册可能失败 | Dashboard 手动加 iframe 卡片 → `/api/lovelace/lovehome/` |
-| 页面空白 | iframe 地址错 / 文件没传 / `?v=N` 没加 | 确认 Dashboard 卡片 URL；确认 `/config/www/lovehome/` 下有 index.html |
+| 🆕 **Error setting up entry for qlovehome** | v1.0.0 的 panel_custom API 签名在 HA 2024.6+ 不兼容 | 升级到 **v1.0.1**（已修复） |
+| 侧边栏没出现 QLovehome | panel 注册可能失败 | Dashboard 手动加 iframe 卡片 → `/qlovehome/www/index.html` |
+| 页面空白 | iframe 地址错 / 文件没传 / `?v=N` 没加 | 确认 Dashboard 卡片 URL；确认 `/config/www/qlovehome/` 下有 index.html |
 | 全是「—」 | 实体 ID 没换成你的 | 打开开发者工具 → 控制台输 `LH.rooms.map(r=>r.lxs)` 看实际读的是什么 |
 | 图标有但点不动 | 该设备的 HA 服务不存在 | HA → **开发者工具 → 服务** → 搜该设备 → 手动触发试试 |
 | 改了没生效 | 浏览器缓存 | `?v=N` 加 1；还不行 Ctrl+Shift+R 硬刷新 |
@@ -262,7 +262,7 @@ copy lovehome\. custom_components\lovehome\www\ -Recurse
 欢迎 PR！提交前请确保：
 1. CI Actions 全绿（HACS validation + Python 语法 + JS 语法）
 2. `manifest.json` 的 `version` 同步更新
-3. 改了 `gen_lovehome_data.py` 要重新跑一遍确认没 break
+3. 改了 `gen_qlovehome_data.py` 要重新跑一遍确认没 break
 
 ---
 

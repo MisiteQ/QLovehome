@@ -1,9 +1,9 @@
 /* LoveHome 可视化编辑器 —— 在页面内直接配置房间、设备、户型图
  *
- * 加载时机：必须在 lovehome-data.js 和 lovehome.js 之后引入（index.html 末尾）。
+ * 加载时机：必须在 qlovehome-data.js 和 qlovehome.js 之后引入（index.html 末尾）。
  * 工作方式：
  *   1. 页面启动时，检查 localStorage 里有没有用户保存过的配置；
- *      有就覆盖 window.LH（lovehome.js 已经读取过一次了，所以我们在 LOVEHOME_READY
+ *      有就覆盖 window.LH（qlovehome.js 已经读取过一次了，所以我们在 QLOVEHOME_READY
  *      事件里重新触发 boot 的渲染流程）。
  *   2. 设置面板里出现「编辑模式」按钮，点开进入编辑器模态框。
  *   3. 所有修改即时保存到 localStorage；支持导入/导出 JSON，支持一键重置回模板。
@@ -11,17 +11,18 @@
 (function () {
   'use strict';
 
-  const LS_KEY = 'lovehome.config.v1';
-  const EVT_READY = 'LOVEHOME_READY';
+  const LS_KEY = 'qlh.config.v1';
+  const OLD_LS_KEY = 'lovehome.config.v1';
+  const EVT_READY = 'QLOVEHOME_READY';
   const NS = 'http://www.w3.org/2000/svg';
   /* 编辑器面板尺寸记忆（用户拖右下角调整大小后，下次打开保持） */
-  const SIZE_KEY = 'lovehome.editor.size.v1';
+  const SIZE_KEY = 'qlh.editor.size.v1';
 
   /* ── 存储层 ─────────────────────────────────────── */
   const Store = {
     load() {
       try {
-        const raw = localStorage.getItem(LS_KEY);
+        const raw = localStorage.getItem(LS_KEY) || localStorage.getItem(OLD_LS_KEY);
         if (!raw) return null;
         const v = JSON.parse(raw);
         if (!v || typeof v !== 'object') return null;
@@ -31,10 +32,11 @@
     save(cfg) {
       try {
         localStorage.setItem(LS_KEY, JSON.stringify(cfg));
+        localStorage.removeItem(OLD_LS_KEY);
         return true;
       } catch (e) { return false; }
     },
-    clear() { try { localStorage.removeItem(LS_KEY); } catch (e) {} }
+    clear() { try { localStorage.removeItem(LS_KEY); localStorage.removeItem(OLD_LS_KEY); } catch (e) {} }
   };
 
   /* 深度合并：把 saved 里的字段覆盖到 base 上，但保留 base 的默认值
@@ -101,9 +103,9 @@
     return applyConfigObject(saved);
   }
 
-  /* ── HA 服务器存储（WebSocket API，配置存 /config/lovehome/config.json）
-     装了 LoveHome 集成 → 所有设备/浏览器共享；没装 → 退回本浏览器 localStorage ── */
-  let serverReady = false;      // LoveHome 集成的 WebSocket API 是否可用
+  /* ── HA 服务器存储（配置存集成自身目录 custom_components/lovehome/qlh/qlh-config.json）
+     装了 QLovehome 集成 → 所有设备/浏览器共享；接口不可用 → 退回本浏览器 localStorage ── */
+  let serverReady = false;      // QLovehome 集成接口是否可用
   let storageMode = 'local';    // 'server' | 'local'
 
   function haHass() {
@@ -115,29 +117,53 @@
     } catch (e) { return null; }
   }
 
+  function haToken() {
+    try { return JSON.parse(localStorage.hassTokens).access_token || ''; } catch (e) { return ''; }
+  }
+  function apiJson(path, opts) {
+    return fetch(path, Object.assign({
+      headers: { Authorization: 'Bearer ' + haToken(), 'Content-Type': 'application/json' }
+    }, opts || {})).then((r) => (r.ok ? r.json() : Promise.reject(r.status)));
+  }
+
+  /* 读配置：WS 优先，REST 兜底；undefined = 接口都不可用 */
   function loadServerConfig() {
     const hass = haHass();
-    if (!hass || typeof hass.callWS !== 'function') return Promise.resolve(undefined);
-    return hass.callWS({ type: 'lovehome/get_config' }).then((res) => {
+    const ok = (cfg) => {
       serverReady = true;
       storageMode = 'server';
-      const cfg = res && res.config;
       // null = 服务器已连接但还没有配置（用模板默认值）
       return (cfg && typeof cfg === 'object' && Object.keys(cfg).length) ? cfg : null;
-    }).catch(() => undefined);   // 集成未安装 / 命令不存在
+    };
+    if (hass && typeof hass.callWS === 'function') {
+      return hass.callWS({ type: 'qlovehome/get_config' })
+        .then((res) => ok(res && res.config))
+        .catch(() => loadServerConfigViaRest(ok));
+    }
+    return loadServerConfigViaRest(ok);
+  }
+
+  function loadServerConfigViaRest(ok) {
+    if (!haToken()) return Promise.resolve(undefined);
+    return apiJson('/api/qlh/config')
+      .then((d) => ok(d && d.config))
+      .catch(() => undefined);
   }
 
   function saveServerConfig(cfg) {
+    const viaRest = () => (haToken()
+      ? apiJson('/api/qlh/config', { method: 'POST', body: JSON.stringify({ config: cfg }) })
+          .then(() => true).catch(() => false)
+      : Promise.resolve(false));
+    if (!serverReady) return viaRest();
     const hass = haHass();
-    if (!hass || typeof hass.callWS !== 'function' || !serverReady) {
-      return Promise.resolve(false);
-    }
-    return hass.callWS({ type: 'lovehome/save_config', config: cfg })
-      .then(() => true).catch(() => false);
+    if (!hass || typeof hass.callWS !== 'function') return viaRest();
+    return hass.callWS({ type: 'qlovehome/save_config', config: cfg })
+      .then(() => true).catch(() => viaRest());
   }
 
-  /* ── 格式归一化：把编辑器里可能改过的数据转回 lovehome.js 期望的格式
-     (lovehome.js 对 room.pts 直接 .split(' ')，必须是字符串) ──────── */
+  /* ── 格式归一化：把编辑器里可能改过的数据转回 qlovehome.js 期望的格式
+     (qlovehome.js 对 room.pts 直接 .split(' ')，必须是字符串) ──────── */
   function normalizeConfig() {
     (window.LH.rooms || []).forEach((r) => {
       if (Array.isArray(r.pts)) {
@@ -156,18 +182,21 @@
     return out;
   }
 
-  /* 保存当前配置：本地镜像 + HA 服务器（若集成可用） */
+  /* 保存当前配置：HA 服务器（主）+ 本机缓存（镜像） */
   function persist() {
     const out = exportConfig();
-    Store.save(out);                       // 本地镜像（缓存 / 未装集成时的唯一存储）
-    if (serverReady) {
-      saveServerConfig(out).then((ok) => {
-        if (ok) { editState.dirty = false; }
-        else toastHint('保存到 HA 服务器失败，当前仅保存在本浏览器');
-      });
-    } else {
-      editState.dirty = false;
-    }
+    Store.save(out);                       // 本地镜像：秒开用，服务器是主数据
+    saveServerConfig(out).then((ok) => {
+      if (ok) {
+        serverReady = true;
+        storageMode = 'server';
+        editState.dirty = false;
+      } else if (serverReady) {
+        toastHint('保存到 HA 服务器失败，当前仅保存在本浏览器');
+      } else {
+        editState.dirty = false;
+      }
+    });
     return true;
   }
 
@@ -187,7 +216,7 @@
       '<div class="lh-ed-mask"></div>' +
       '<div class="lh-ed-panel">' +
         '<div class="lh-ed-head">' +
-          '<div class="lh-ed-title"><svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4z"/></svg>LoveHome 可视化编辑器' +
+          '<div class="lh-ed-title"><svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4z"/></svg>QLovehome 可视化编辑器' +
             '<span class="lh-ed-badge" id="lhEdStorageBadge"></span></div>' +
           '<div class="lh-ed-head-actions">' +
             '<button class="lh-ed-btn" id="lhEdExport" type="button">导出 JSON</button>' +
@@ -274,7 +303,7 @@
     // 存储模式徽章
     const badge = $('#lhEdStorageBadge', root);
     if (badge) {
-      if (serverReady) { badge.textContent = '服务器同步 · 全设备'; badge.classList.add('ok'); }
+      if (serverReady) { badge.textContent = '已同步到 HA'; badge.classList.add('ok'); }
       else { badge.textContent = '仅本机保存'; badge.classList.add('warn'); }
     }
 
@@ -375,19 +404,19 @@
       p.h = parseFloat($('#phH', bar).value) || plan.h;
       markDirty();
       rerenderEditorTab();
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     };
     ['phX', 'phY', 'phW', 'phH'].forEach((id) => $('#' + id, bar).addEventListener('change', apply));
     $('#phFit', bar).addEventListener('click', () => {
       p.x = 0; p.y = 0; p.w = plan.w; p.h = plan.h;
       markDirty(); rerenderEditorTab();
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     });
     $('#phDel', bar).addEventListener('click', () => {
       if (!confirm('确定移除底图？')) return;
       delete plan.photo;
       markDirty(); rerenderEditorTab();
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     });
     return bar;
   }
@@ -516,10 +545,10 @@
           const plan = window.LH.plan || (window.LH.plan = { w: 620, h: 692 });
           plan.photo = { src: r.result, x: 0, y: 0, w: plan.w, h: plan.h };
           // 自动切到「现实」皮肤，让底图在主页面立刻可见
-          try { localStorage.setItem('lhSkin', 'real'); } catch (e) { /* ignore */ }
+          try { localStorage.setItem('qlh.skin', 'real'); } catch (e) { /* ignore */ }
           markDirty();
           rerenderEditorTab();
-          document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+          document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
           toastHint('底图已导入，主页自动切换到「现实」皮肤。用底图栏的 X/Y/宽/高 微调对位');
         };
         r.readAsDataURL(f);
@@ -689,7 +718,7 @@
           room.lx = Math.round(((b[0] + b[2]) / 2) * 10) / 10;
           room.ly = Math.round(((b[1] + b[3]) / 2) * 10) / 10;
           markDirty(); rerenderEditorTab();
-          document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+          document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
         }
         askRoomName(room);
       });
@@ -714,7 +743,7 @@
     selected = { type: 'room', id: newId };
     markDirty();
     rerenderEditorTab();
-    document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
 
     /* 先看有没有重叠 —— 有重叠就让 applyOverlapAction 处理完后继续 postCreate；
        没重叠直接 postCreate */
@@ -831,7 +860,7 @@
     setTimeout(() => { input.focus(); input.select(); }, 30);
     const commit = () => {
       const v = (input.value || '').trim();
-      if (v) { room.name = v; markDirty(); rerenderEditorTab(); document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER')); }
+      if (v) { room.name = v; markDirty(); rerenderEditorTab(); document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER')); }
       dlg.remove();
     };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') dlg.remove(); });
@@ -1025,7 +1054,7 @@
 
     markDirty();
     rerenderEditorTab();
-    document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
 
     /* 新画的房间处理完了（还有效）→ 继续走 postCreate：轴对齐检测 + 弹命名 */
     if (roomToName) postCreateRoom(roomToName);
@@ -1182,7 +1211,7 @@
     return svg;
   }
 
-  /* 自动外轮廓路径：复用 lovehome.js 的几何工具（LHGeo），保证和主界面完全一致。
+  /* 自动外轮廓路径：复用 qlovehome.js 的几何工具（LHGeo），保证和主界面完全一致。
      轮廓是「房间并集外扩 18」后提取的贴合墙体的曲线，L 形/凹口都会跟着折弯。 */
   function framePathString() {
     const geo = window.LHGeo;
@@ -1260,7 +1289,7 @@
       poly._skipClick = true;
       markDirty();
       rerenderEditorTab();
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     }
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
@@ -1393,7 +1422,7 @@
       editState.plan.dragDevice = null;
       g.classList.remove('dragging');
       markDirty();
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     };
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
@@ -1467,7 +1496,7 @@
       markDirty();
       document.removeEventListener('mousemove', move);
       document.removeEventListener('mouseup', up);
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     }
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
@@ -1491,7 +1520,7 @@
     selected = { type: null, id: null };
     markDirty();
     rerenderEditorTab();
-    document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
   }
 
   function deleteRoom(id) {
@@ -1499,14 +1528,14 @@
     window.LH.rooms = window.LH.rooms.filter((r) => r.id !== id);
     markDirty();
     rerenderEditorTab();
-    document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
   }
   function deleteDevice(id) {
     if (!confirm(`确定删除设备 "${id}"？`)) return;
     window.LH.devices = window.LH.devices.filter((d) => d.id !== id);
     markDirty();
     rerenderEditorTab();
-    document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
   }
 
   /* 刷新当前 editor tab（户型图需要完全重绘） */
@@ -1829,7 +1858,7 @@
     window.LH.devices = (window.LH.devices || []).filter((d) => ids.indexOf(d.id) < 0);
     multiSel.devices.clear();
     markDirty(); rerenderEditorTab();
-    document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
   }
 
   /* ══════════════════════════════════════════════════════
@@ -2163,7 +2192,7 @@
       markDirty();
       closeIt();
       rerenderEditorTab();
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
       toastHint('已导入 ' + toCreate.length + ' 台设备 · 编辑器里拖到对应房间');
     };
   }
@@ -2225,7 +2254,7 @@
     return devDialog;
   }
 
-  /* ── 设备类型表：与 lovehome.js 的 ICON 一一对应 ──────────────
+  /* ── 设备类型表：与 qlovehome.js 的 ICON 一一对应 ──────────────
      kind 必须是主程序认识的键（图标才显示得出来），这里的中文标签
      和 <use> 图标让用户不用记英文单词 */
   const KIND_OPTIONS = [
@@ -2455,7 +2484,7 @@
       markDirty();
       devDialog.classList.remove('open');
       rerenderEditorTab();
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     };
   }
 
@@ -2484,7 +2513,7 @@
     (window.LH.devices || []).forEach((d) => { if (ids.indexOf(d.room) >= 0) d.room = ''; });
     multiSel.rooms.clear();
     markDirty(); rerenderEditorTab();
-    document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
   }
 
   function buildRoomRow(r) {
@@ -2508,7 +2537,7 @@
       if (!confirm(`确定删除房间 "${r.name}"？里面的设备会变成无房间归属。`)) return;
       window.LH.rooms = window.LH.rooms.filter((x) => x.id !== r.id);
       markDirty(); rerenderEditorTab();
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     };
     return row;
   }
@@ -2560,7 +2589,7 @@
       markDirty();
       devDialog.classList.remove('open');
       rerenderEditorTab();
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     };
   }
 
@@ -2635,7 +2664,7 @@
   function buildShellTab() {
     const wrap = el('div', 'lh-ed-overview');
     const cfg = window.LH.config || (window.LH.config = {});
-    /* 当前生效的「全屋」统计行：没配过就用默认四类（和 lovehome.js 的兜底一致） */
+    /* 当前生效的「全屋」统计行：没配过就用默认四类（和 qlovehome.js 的兜底一致） */
     const rows = (Array.isArray(cfg.homeStats) && cfg.homeStats.length)
       ? cfg.homeStats.map((x) => ({ kind: x.kind, name: x.name || kindLabel(x.kind) }))
       : ['light', 'ac', 'heat', 'fresh'].map((k) => ({ kind: k, name: kindLabel(k) }));
@@ -2661,7 +2690,7 @@
       cfg.homeStats = rows.map((r) => ({ kind: r.kind, name: r.name || kindLabel(r.kind) }));
       window.LH.filters = flt.map((f) => ({ id: f.id, name: f.name, icon: f.icon }));
       markDirty();
-      if (live) document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      if (live) document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     }
     const escq = (s) => String(s == null ? '' : s).replace(/"/g, '&quot;');
 
@@ -2885,7 +2914,7 @@
       window.LH.config.overview = ov;
       markDirty();
       toastHint('概览设置已保存');
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     };
 
     // 家人
@@ -2954,8 +2983,8 @@
   function buildDataTab() {
     const wrap = el('div', 'lh-ed-data');
     const storeTip = serverReady
-      ? '<div class="lh-ed-store ok">✓ 已连接 LoveHome 集成：配置保存在 Home Assistant 服务器上（/config/lovehome/config.json）。<b>换电脑、换浏览器、手机打开 HA，看到的都是同一个家</b>。</div>'
-      : '<div class="lh-ed-store warn">⚠ 未检测到 LoveHome 集成：当前配置仅保存在本浏览器，换设备会丢失。<br>在 HA「设置 → 设备与服务 → 添加集成」里安装 LoveHome 后，配置会自动存到 HA 服务器，全设备共享。</div>';
+      ? '<div class="lh-ed-store ok">✓ 已连接 QLovehome 集成：配置保存在 Home Assistant 服务器上（集成自身目录 qlh/qlh-config.json）。<b>换电脑、换浏览器、手机打开 HA，看到的都是同一个家</b>。</div>'
+      : '<div class="lh-ed-store warn">⚠ 未检测到 QLovehome 集成：当前配置仅保存在本浏览器，换设备会丢失。<br>把 custom_components/lovehome 放进 HA 并重启后，配置会自动存到服务器，全设备共享。</div>';
     wrap.innerHTML = `
       <h3>配置备份与恢复</h3>
       ${storeTip}
@@ -3050,7 +3079,7 @@
     persist();
     toastHint(serverReady ? '导入成功，已保存到 HA 服务器（所有设备生效）' : '导入成功，已保存到本浏览器');
     rerenderEditorTab();
-    document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
   }
 
   async function doReset() {
@@ -3061,7 +3090,7 @@
       const ok = await saveServerConfig({});
       if (!ok) toastHint('服务器配置清除失败，请稍后重试');
     }
-    // 重新加载页面才能恢复 lovehome-data.js 里的原始 window.LH
+    // 重新加载页面才能恢复 qlovehome-data.js 里的原始 window.LH
     if (confirm('需要刷新页面才能完全恢复。现在刷新吗？')) {
       location.reload();
     }
@@ -3088,7 +3117,7 @@
     return prefix + n;
   }
 
-  /* ── 注入编辑器入口（在 lovehome.js 加载完成后） ────────── */
+  /* ── 注入编辑器入口（在 qlovehome.js 加载完成后） ────────── */
   function injectEntry() {
     // 在设置齿轮 (#fnSet) 旁边加一个「编辑」按钮
     const fnSet = $('#fnSet');
@@ -3097,7 +3126,7 @@
     const btn = el('button', 'fn-btn',
       '<svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4z"/></svg>');
     btn.id = 'fnEdit';
-    btn.title = 'LoveHome 可视化编辑器';
+    btn.title = 'QLovehome 可视化编辑器';
     btn.setAttribute('aria-label', '可视化编辑器');
     btn.addEventListener('click', openEditor);
     // 插到 fnSet 前面
@@ -3117,7 +3146,7 @@
    * 初始化
    * 1) 优先从 HA 服务器读配置（装了 LoveHome 集成 → 全设备共享）
    * 2) 服务器不可用 → 退回本浏览器 localStorage
-   * 3) 等 lovehome.js boot 完成后触发重绘 + 注入编辑入口
+   * 3) 等 qlovehome.js boot 完成后触发重绘 + 注入编辑入口
    * ══════════════════════════════════════════════════════ */
   function init() {
     loadServerConfig().then((srv) => {
@@ -3130,24 +3159,30 @@
         // 服务器不可用（未装集成）→ 用本浏览器缓存
         applied = applySavedConfig();
       }
-      // srv === null → 服务器已连接但没有配置 → 用模板默认值
+      // srv === null → 服务器已连接但没有配置：
+      //   本机有旧配置就推上去（老用户升级时自动迁移到 HA 服务器）
+      if (srv === null && Store.load()) {
+        applySavedConfig();
+        applied = true;
+        persist();
+      }
       if (applied) rerenderWhenReady();
     });
     // 注入编辑入口（轮询等 boot 跑完 #fnSet 出现）
     pollInject();
   }
 
-  /* 等 lovehome.js boot 完成后再触发重绘（boot 会设置 window.LOVEHOME_BOOTED） */
+  /* 等 qlovehome.js boot 完成后再触发重绘（boot 会设置 window.QLOVEHOME_BOOTED） */
   function rerenderWhenReady() {
-    if (window.LOVEHOME_BOOTED) {
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+    if (window.QLOVEHOME_BOOTED) {
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
       return;
     }
-    document.addEventListener('LOVEHOME_BOOTED', () => {
-      document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+    document.addEventListener('QLOVEHOME_BOOTED', () => {
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     }, { once: true });
     // 兜底：如果事件没等到（比如版本不匹配），30s 后强发一次
-    setTimeout(() => document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER')), 30000);
+    setTimeout(() => document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER')), 30000);
   }
 
   document.addEventListener('DOMContentLoaded', init);

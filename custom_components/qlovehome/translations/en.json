@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "QLovehome",
+        "description": "Click Submit to finish the installation.\n\nAfter installation:\n• A QLovehome entry appears in the sidebar\n• Dashboard config is stored on the HA server (integration folder qlh/qlh-config.json)\n• Every browser and device sees the same home"
+      }
+    },
+    "abort": {
+      "already_configured": "QLovehome is already installed. Open it from the sidebar."
+    }
+  }
+}

@@ -25,7 +25,7 @@
     otherTimer: null,
     /* 无操作计时：先复位显示状态，再进待机（两个计时器，都从最后一次操作起算） */
     resetTimer: null,
-    /* boot() 完成标记：编辑器的 LOVEHOME_RERENDER 必须等 boot 跑完 */
+    /* boot() 完成标记：编辑器的 QLOVEHOME_RERENDER 必须等 boot 跑完 */
     booted: false
   };
 
@@ -37,6 +37,158 @@
     } catch (e) { return null; }
   }
   const live = () => !!(hass() && LH.config.live);
+
+  /* ══ 配置仓储（v281）══════════════════════════════════════════
+     主数据存 HA 服务器上「本集成自身目录」：custom_components/lovehome/qlh/qlh-config.json
+     读取顺序：HA 服务器 → 本机 localStorage 缓存 → 模板默认值
+     localStorage 只当缓存（秒开用），换电脑只要连同一台 HA 就能完整还原 */
+  const CFG_KEY = 'qlh.config.v1';                 // 新 key（带 qlh 前缀）
+  const OLD_CFG_KEY = 'lovehome.config.v1';        // 老 key，只读来迁移
+  const CFG_SECTIONS = ['config', 'plan', 'rooms', 'devices', 'readouts',
+                        'scenes', 'filters', 'appliances', 'supplies', 'panel', 'missing'];
+
+  function localCfgRead() {
+    try {
+      const raw = localStorage.getItem(CFG_KEY) || localStorage.getItem(OLD_CFG_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+  function localCfgWrite(cfg) {
+    try {
+      localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+      localStorage.removeItem(OLD_CFG_KEY);
+    } catch (e) { /* 无痕模式忽略 */ }
+  }
+  /* 把配置对象覆盖到 window.LH（返回覆盖到的段数） */
+  function applyCfg(cfg) {
+    if (!cfg || typeof cfg !== 'object') return 0;
+    let n = 0;
+    for (const k of CFG_SECTIONS) if (cfg[k] != null) { window.LH[k] = cfg[k]; n++; }
+    return n;
+  }
+
+  /* HA 访问令牌：直接打开页面（父窗口没 hass）时走 REST 用 */
+  function haToken() {
+    try { return JSON.parse(localStorage.hassTokens).access_token || ''; } catch (e) { return ''; }
+  }
+  function apiFetch(path, opts) {
+    const t = haToken();
+    return fetch(path, Object.assign({
+      headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }
+    }, opts || {}));
+  }
+
+  /* 读完整配置：WS 优先，REST 兜底；undefined = 接口都不可用 */
+  function remoteCfgLoad() {
+    const h = hass();
+    if (h && typeof h.callWS === 'function') {
+      return h.callWS({ type: 'qlovehome/get_config' })
+        .then((r) => nonEmptyCfg(r && r.config))
+        .catch(() => apiCfgLoad());
+    }
+    return apiCfgLoad();
+  }
+  /* 服务器空文件 = 还没配置过 → null */
+  function nonEmptyCfg(c) {
+    return (c && typeof c === 'object' && Object.keys(c).length) ? c : null;
+  }
+  function apiCfgLoad() {
+    if (!haToken()) return Promise.resolve(undefined);
+    return apiFetch('/api/qlh/config')
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => nonEmptyCfg(d && d.config))
+      .catch(() => undefined);
+  }
+  function remoteCfgSave(cfg) {
+    const viaRest = () => (haToken()
+      ? apiFetch('/api/qlh/config', { method: 'POST', body: JSON.stringify({ config: cfg }) })
+          .then((r) => r.ok).catch(() => false)
+      : Promise.resolve(false));
+    const h = hass();
+    if (h && typeof h.callWS === 'function') {
+      return h.callWS({ type: 'qlovehome/save_config', config: cfg })
+        .then(() => true).catch(() => viaRest());
+    }
+    return viaRest();
+  }
+
+  /* ── 界面设置：主题 / 皮肤 / 季节 / 待机 / 侧栏显隐 / 定时 / 晾衣架 ──
+     统一存到服务器的 ui 段，换电脑也一起跟过来（localStorage 仍作缓存） */
+  const UI_MAP = {
+    theme: ['qlh.theme', 'lhTheme'],
+    skin: ['qlh.skin', 'lhSkin'],
+    season: ['qlh.season', 'lhSeason'],
+    standby: ['qlh.standby', 'lhStandby'],
+    uiPref: ['qlh.ui', 'lhUI'],
+    timers: ['qlh.timers', 'lhTimers'],
+    airerAt: ['qlh.airerAt', 'lh.airer.at'],
+  };
+  function uiRead(name) {
+    const pair = UI_MAP[name];
+    if (!pair) return null;
+    try {
+      const v = localStorage.getItem(pair[0]);
+      if (v != null) return v;
+      return pair[1] ? localStorage.getItem(pair[1]) : null;
+    } catch (e) { return null; }
+  }
+  function uiWrite(name, val, noSync) {
+    const pair = UI_MAP[name];
+    if (!pair) return;
+    try { localStorage.setItem(pair[0], val); } catch (e) { /* 隐私模式忽略 */ }
+    if (!noSync) queueUiSave();
+  }
+  function uiCollect() {
+    const out = {};
+    Object.keys(UI_MAP).forEach((n) => {
+      const raw = uiRead(n);
+      if (raw == null) return;
+      try { out[n] = JSON.parse(raw); } catch (e) { out[n] = raw; }
+    });
+    return out;
+  }
+  let uiSaveTimer = null;
+  function queueUiSave() {
+    if (uiSaveTimer) clearTimeout(uiSaveTimer);
+    uiSaveTimer = setTimeout(() => { uiSaveTimer = null; uiRemoteSave(uiCollect()); }, 700);
+  }
+  function uiRemoteSave(ui) {
+    const viaRest = () => (haToken()
+      ? apiFetch('/api/qlh/ui', { method: 'POST', body: JSON.stringify({ ui }) })
+          .then((r) => r.ok).catch(() => false)
+      : Promise.resolve(false));
+    const h = hass();
+    if (h && typeof h.callWS === 'function') {
+      return h.callWS({ type: 'qlovehome/save_ui', ui }).then(() => true).catch(viaRest);
+    }
+    return viaRest();
+  }
+  function uiRemoteLoad() {
+    const h = hass();
+    if (h && typeof h.callWS === 'function') {
+      return h.callWS({ type: 'qlovehome/get_ui' })
+        .then((r) => (r && r.ui) || null)
+        .catch(() => apiUiLoad());
+    }
+    return apiUiLoad();
+  }
+  function apiUiLoad() {
+    if (!haToken()) return Promise.resolve(undefined);
+    return apiFetch('/api/qlh/ui')
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => (d && d.ui) || null)
+      .catch(() => undefined);
+  }
+  function uiApplyRemote(ui) {
+    if (!ui || typeof ui !== 'object') return false;
+    let hit = false;
+    Object.keys(UI_MAP).forEach((n) => {
+      if (ui[n] == null) return;
+      const v = typeof ui[n] === 'string' ? ui[n] : JSON.stringify(ui[n]);
+      try { localStorage.setItem(UI_MAP[n][0], v); hit = true; } catch (e) { /* 忽略 */ }
+    });
+    return hit;
+  }
   function st(id) {
     const h = hass();
     return id && h ? h.states[id] || null : null;
@@ -107,11 +259,12 @@
                 '关页面太久（超过 1 分钟）的过期任务会直接丢弃。';
   function timersOf() {
     try {
-      const v = JSON.parse(localStorage.getItem(TKEY) || '{}');
+      const raw = uiRead('timers');
+      const v = JSON.parse(raw || '{}');
       return (v && typeof v === 'object') ? v : {};
     } catch (e) { return {}; }
   }
-  function saveTimers(t) { try { localStorage.setItem(TKEY, JSON.stringify(t)); } catch (e) {} }
+  function saveTimers(t) { uiWrite('timers', JSON.stringify(t)); }
   function timerDom(e) { return (e || '').split('.')[0]; }
   function timerOk(d) { return !!d && !!d.entity && TDOMS.indexOf(timerDom(d.entity)) >= 0; }
   function fmtMin(m) {
@@ -293,8 +446,8 @@
      而且 50 时 HA 还会把 state 推成 open —— 直接念成「已放下 50%」就是撒谎。
      做法：运动态优先，其次两个确定位；报 50 时用上一次到位的记录兜底。 */
   const AIRER_KEY = 'lh.airer.at';
-  function airerAt() { try { return localStorage.getItem(AIRER_KEY) || ''; } catch (e) { return ''; } }
-  function airerSet(v) { try { if (airerAt() !== v) localStorage.setItem(AIRER_KEY, v); } catch (e) { /* 无痕模式忽略 */ } }
+  function airerAt() { return uiRead('airerAt') || ''; }
+  function airerSet(v) { if (airerAt() !== v) uiWrite('airerAt', v); }
   function coverPos(s) {
     if (!s) return { text: '—' };
     if (s.state === 'unavailable') return { text: '离线' };
@@ -1285,17 +1438,12 @@
           document.removeEventListener('mousemove', move);
           document.removeEventListener('mouseup', up);
           g.style.cursor = '';
-          // 保存到 localStorage，编辑器和主界面共享同一个 key
+          // 保存：本机缓存 + HA 服务器（换电脑也保持）
           try {
-            const KEY = 'lovehome.config.v1';
-            let cfg;
-            const raw = localStorage.getItem(KEY);
-            if (raw) {
-              cfg = JSON.parse(raw);
-            } else {
-              // 没有已保存的配置，用当前 LH 初始化一份
+            let cfg = localCfgRead();
+            if (!cfg) {
               cfg = {};
-              ['plan', 'rooms', 'devices', 'config', 'hass'].forEach((k) => {
+              ['plan', 'rooms', 'devices', 'config'].forEach((k) => {
                 if (window.LH[k] != null) cfg[k] = window.LH[k];
               });
             }
@@ -1303,7 +1451,8 @@
             const room = cfg.rooms.find((x) => x.id === r.id);
             if (room) { room.lx = r.lx; room.ly = r.ly; }
             else { cfg.rooms.push({ id: r.id, lx: r.lx, ly: r.ly }); }
-            localStorage.setItem(KEY, JSON.stringify(cfg));
+            localCfgWrite(cfg);
+            remoteCfgSave(cfg);
           } catch (e) { /* 无痕模式忽略 */ }
         }
         document.addEventListener('mousemove', move);
@@ -1793,7 +1942,7 @@
   /* 常驻栏要 320px 才装得下（见 .alt-panel）：≤900 由 CSS 整块撤掉，
      设备改走「点户型图图标 → 操作浮层」。这里同步一个判断，
      省掉窄屏上每 2 秒白跑一次 refreshAlt。
-     ⚠️ 断点必须和 lovehome.css「@media (max-width: 900px)」里的 #altPanel 一致。 */
+     ⚠️ 断点必须和 qlovehome.css「@media (max-width: 900px)」里的 #altPanel 一致。 */
   const ALT_MIN_W = 900;
   function altWide() { return window.innerWidth > ALT_MIN_W; }
   /* 统一的显隐判定：开着 + 够宽 + 没开房间面板 + 在首页 才显示 */
@@ -3714,7 +3863,7 @@
         if (window.LHEditor && window.LHEditor.saveConfig) window.LHEditor.saveConfig();
         closeIt();
         // 触发主界面重绘
-        document.dispatchEvent(new CustomEvent('LOVEHOME_RERENDER'));
+        document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
         // 刷新未接入清单
         state.missing = null;
         loadMissing(true).then(() => openOther(true));
@@ -4057,7 +4206,7 @@
       <ul>
         <li>整页文字统一缩放（顶栏、左栏、面板、弹窗、屏保时间都跟着变），默认 <b>100%</b>。</li>
         <li>图标和栅格尺寸不跟着变，所以放大后不会把布局挤歪；可调范围 <b>${FS_MIN}~${FS_MAX}%</b>，
-            记在本机（<code>localStorage.lhUI</code>）。</li>
+            记在 HA 服务器上（换电脑也同步）。</li>
       </ul>
       <div class="pane-row">
         <input class="pane-rng" id="${ids.fsr}" data-fs-rng type="range"
@@ -4069,7 +4218,7 @@
       <h3>面板透明度</h3>
       <ul>
         <li>左栏（全屋摘要 / 房间列表）和右侧<b>房间面板</b>的底色透明度，默认 <b>75%</b>：只留一层雾面玻璃，背后的氛围光会透上来。</li>
-        <li>拖动滑块实时生效，记在本机（<code>localStorage.lhUI</code>）；调太透如果觉得字飘，往左拉一点就行。</li>
+        <li>拖动滑块实时生效，记在 HA 服务器上（换电脑也同步）；调太透如果觉得字飘，往左拉一点就行。</li>
       </ul>
       <div class="pane-row">
         <input class="pane-rng" id="${ids.rng}" data-pane-rng type="range" min="0" max="100" step="5"
@@ -4111,7 +4260,7 @@
       <ul>
         <li><b>自动复原</b>：无操作多少分钟后，把界面从子页面（房间详情 / 概览等）恢复到首页。</li>
         <li><b>进入屏保</b>：无操作多少分钟后，进入待机屏保界面（显示大屏时钟）。</li>
-        <li>屏幕触控、键盘、滚轮任意操作都会重置计时。记在本机（<code>localStorage.lhStandby</code>）。</li>
+        <li>屏幕触控、键盘、滚轮任意操作都会重置计时。计时设置记在 HA 服务器上（换电脑也同步）。</li>
       </ul>
       <div class="pane-row">
         <label class="pane-label">复原 <input id="setResetMin" type="number" min="1" max="30" step="1" value="2" aria-label="自动复原分钟"> 分钟</label>
@@ -4217,7 +4366,7 @@
         <li>一个给 <b>Home Assistant</b> 用的家庭大屏面板，面向有米家设备、想在门口 / 客厅放一块平板的用户。</li>
         <li>核心能力：<b>户型图可视化 + 房间温湿度 + 灯光中控 + 安防状态 + 家电汇总 + 天气日历</b>。</li>
         <li>运行方式：Home Assistant 自定义集成（<code>custom_components/lovehome</code>），前端纯原生 HTML + SVG + JS，不走 Webpack，源码可读可改。</li>
-        <li>所有个性化设置（字体大小、面板透明度、主题深浅、四季配色、待机时间、户型数据）都记在本机 <b>localStorage</b>，不上云、不回传。</li>
+        <li>所有个性化设置（字体大小、面板透明度、主题深浅、四季配色、待机时间、户型数据）都保存在 <b>Home Assistant 服务器</b>的 QLovehome 集成目录里，换电脑 / 换浏览器自动还原；localStorage 只作本机缓存。</li>
       </ul>
       <div class="about-grid">
         <div class="about-cell"><b>户型图</b><span>矢量 SVG 渲染，支持矩形 / 多边形 / 圆形房间，支持底图导入，墙体自动融合成一体</span></div>
@@ -4737,7 +4886,7 @@
   const DEFAULT_IDLE_MS = 5 * 60 * 1000;
   function loadStandbyTimers() {
     try {
-      const raw = localStorage.getItem('lhStandby');
+      const raw = uiRead('standby');
       if (!raw) return { reset: DEFAULT_RESET_MS, idle: DEFAULT_IDLE_MS };
       const v = JSON.parse(raw);
       return {
@@ -4747,7 +4896,7 @@
     } catch (e) { return { reset: DEFAULT_RESET_MS, idle: DEFAULT_IDLE_MS }; }
   }
   function saveStandbyTimers(obj) {
-    try { localStorage.setItem('lhStandby', JSON.stringify(obj)); } catch (e) {}
+    uiWrite('standby', JSON.stringify(obj));
   }
   function getStandbyTimers() { return loadStandbyTimers(); }
   let RESET_MS, IDLE_MS;
@@ -5142,10 +5291,11 @@
 
   /* ── 主题：默认跟随 sun.sun 的日出日落 ── */
   function themeMode() {
-    try { return localStorage.getItem('lhTheme') || 'auto'; } catch (e) { return 'auto'; }
+    const v = uiRead('theme');
+    return v || 'auto';
   }
   function setThemeMode(m) {
-    try { localStorage.setItem('lhTheme', m); } catch (e) { /* 无痕模式忽略 */ }
+    uiWrite('theme', m);
     applyTheme();
   }
   function applyTheme() {
@@ -5171,10 +5321,10 @@
      与昼夜主题、四季配色都正交：只改户型的画法，不动页面其它部分。
      存 localStorage.lhSkin（'flat' 默认 / 'real'），挂在 #screen[data-skin] 上给 CSS 用 */
   function skinOn() {
-    try { return localStorage.getItem('lhSkin') === 'real'; } catch (e) { return false; }
+    return uiRead('skin') === 'real';
   }
   function setSkin(on) {
-    try { localStorage.setItem('lhSkin', on ? 'real' : 'flat'); } catch (e) { /* 无痕模式忽略 */ }
+    uiWrite('skin', on ? 'real' : 'flat');
     applySkin();
   }
   function applySkin() {
@@ -5302,10 +5452,11 @@
     return 'winter';
   }
   function seasonMode() {
-    try { return localStorage.getItem('lhSeason') || 'auto'; } catch (e) { return 'auto'; }
+    const v = uiRead('season');
+    return v || 'auto';
   }
   function setSeasonMode(m) {
-    try { localStorage.setItem('lhSeason', m); } catch (e) { /* 无痕模式忽略 */ }
+    uiWrite('season', m);
     applySeason();
   }
   function applySeason() {
@@ -5505,10 +5656,10 @@
     });
   }
 
-  /* ── 左栏 / 顶栏显隐（记在 localStorage，刷新后保持） ── */
-  const UI_KEY = 'lhUI';
+  /* ── 左栏 / 顶栏显隐（存服务器 ui 段，换电脑也跟过来） ── */
+  const UI_KEY = 'qlh.ui';
   function uiPref() {
-    try { return JSON.parse(localStorage.getItem(UI_KEY) || '{}') || {}; } catch (e) { return {}; }
+    try { return JSON.parse(uiRead('uiPref') || '{}') || {}; } catch (e) { return {}; }
   }
   function applyUI() {
     const p = uiPref();
@@ -5572,7 +5723,7 @@
   let fsTouched = false;   // 全屏期间是否被手动改过
   let fsOn = false;
   function saveUI(p) {
-    try { localStorage.setItem(UI_KEY, JSON.stringify(p)); } catch (e) { /* 隐私模式忽略 */ }
+    uiWrite('uiPref', JSON.stringify(p));
   }
   function fsLink(on) {
     if (on === fsOn) return;
@@ -5711,37 +5862,64 @@
         }
       }
       if (changed) {
-        // 写回 localStorage（编辑器下次打开也能看到）
+        // 写回缓存 + HA 服务器（换电脑也能拿到补全后的设备）
         try {
-          const raw = localStorage.getItem('lovehome.config.v1');
-          if (raw) {
-            const cfg = JSON.parse(raw);
+          const cfg = localCfgRead();
+          if (cfg) {
             cfg.devices = devs;
-            localStorage.setItem('lovehome.config.v1', JSON.stringify(cfg));
-            console.log('[LoveHome] ✓ 迁移了', needMigrate.filter((d) => d.entities && d.entities.length).length, '台老设备（补全 entities 数组）');
+            localCfgWrite(cfg);
+            remoteCfgSave(cfg);
+            console.log('[QLovehome] ✓ 迁移了', needMigrate.filter((d) => d.entities && d.entities.length).length, '台老设备（补全 entities 数组）');
           }
-        } catch (e) {}
+        } catch (e) { /* 忽略 */ }
       }
     }).catch(() => { /* WS 暂时不可用，静默跳过 */ });
   }
 
-  function boot() {
-    // ★ 关键：先读用户保存的配置覆盖模板
-    // 编辑器 persist() 保存到 localStorage('lovehome.config.v1')
-    // 主界面必须先读这个，否则刷新就回到模板（用户啥都白改）
-    try {
-      const raw = localStorage.getItem('lovehome.config.v1');
-      if (raw) {
-        const saved = JSON.parse(raw);
-        const SECTIONS = ['config', 'plan', 'rooms', 'devices', 'readouts',
-                          'scenes', 'filters', 'appliances', 'supplies', 'panel', 'missing'];
-        for (const k of SECTIONS) if (saved[k] != null) window.LH[k] = saved[k];
+  /* ── 启动后从 HA 服务器对齐配置 + 界面设置 ──
+     有服务器数据就以服务器为准（重绘）；服务器还没有数据时，
+     把本机缓存推上去（老用户 / 首次安装自动上云） */
+  function syncFromServer() {
+    return remoteCfgLoad().then((cfg) => {
+      if (cfg === undefined) return null;                 // 接口不可用
+      if (cfg) {
+        if (applyCfg(cfg)) {
+          localCfgWrite(cfg);
+          if (state.booted) rerenderAll();
+        }
+      } else {
+        const local = localCfgRead();
+        if (local) {
+          window.LH.rooms = window.LH.rooms || local.rooms;
+          remoteCfgSave(local);                           // 服务器空 → 本机推上去
+        }
       }
-    } catch (e) { console.warn('[LoveHome] 读取保存配置失败', e); }
+      return uiRemoteLoad();
+    }).then((ui) => {
+      if (!ui) return;
+      if (Object.keys(ui).length) {
+        if (uiApplyRemote(ui)) {
+          const t = loadStandbyTimers();
+          RESET_MS = t.reset; IDLE_MS = t.idle;
+          applyTheme(); applySeason(); applySkin(); applyUI();
+          if (state.booted) rerenderAll();
+        }
+      } else {
+        uiRemoteSave(uiCollect());                        // 服务器还没存过界面设置 → 本机推上去
+      }
+    }).catch(() => { /* ignore */ }).then(() => {
+      /* 配置对齐之后再补全老设备的 entities（避免用旧缓存覆盖服务器数据） */
+      try { migrateDeviceEntities(); } catch (e) { /* ignore */ }
+    });
+  }
 
-    // ★ 迁移：老设备没有 entities 数组的，异步补全 device_id + 兄弟实体
-    //    （让升级到新版后，旧户型图里的设备也能匹配 DEVICE_TEMPLATES 走专业面板）
-    try { migrateDeviceEntities(); } catch (e) {}
+  function boot() {
+    // ★ 关键：先用本机缓存秒开（localStorage 只是缓存），
+    //   随后 syncFromServer() 用 HA 服务器上的配置覆盖并重绘
+    try {
+      const cached = localCfgRead();
+      if (cached) applyCfg(cached);
+    } catch (e) { console.warn('[QLovehome] 读取缓存配置失败', e); }
 
     buildPlan();
     buildSide();
@@ -5792,15 +5970,17 @@
     }, LH.config.refreshMs || 2000);
     state.booted = true;
     /* 通知编辑器：boot 已完成，可以安全地触发重绘/注入入口 */
-    window.LOVEHOME_BOOTED = true;
-    document.dispatchEvent(new CustomEvent('LOVEHOME_BOOTED'));
+    window.QLOVEHOME_BOOTED = true;
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_BOOTED'));
+    /* ★ 再从 HA 服务器拉一次（换电脑 / 换浏览器时靠这一步还原全部配置与设置） */
+    syncFromServer();
   }
 
   /* ── 编辑器触发的整体重绘（不重启定时器、不重新绑事件） ── */
   function rerenderAll() {
     // boot() 还没跑完就别瞎重绘（编辑器可能比 boot 先 dispatch 事件）
     if (!state.booted) return;
-    // 确保 lovehome.js 期望的数据格式（room.pts 必须是字符串）
+    // 确保 qlovehome.js 期望的数据格式（room.pts 必须是字符串）
     try {
       if (typeof window.LHEditor !== 'undefined' && typeof window.LHEditor.normalize === 'function') {
         window.LHEditor.normalize();
@@ -5824,11 +6004,13 @@
     applyTheme();
     applySeason();
     applySkin();
+    /* 6) 编辑器里改过界面设置（如导入底图自动切现实皮肤）→ 一并同步到服务器 */
+    try { queueUiSave(); } catch (e) { /* ignore */ }
     // 6) 立刻重刷一次数值（不用等下一个 2s tick）
     paintValues();
   }
 
-  document.addEventListener('LOVEHOME_RERENDER', rerenderAll);
+  document.addEventListener('QLOVEHOME_RERENDER', rerenderAll);
 
   document.addEventListener('DOMContentLoaded', () => {
     // 等父窗口的 hass 就绪（iframe 首次加载时可能还没注入）

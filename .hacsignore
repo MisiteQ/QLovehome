@@ -1,5 +1,5 @@
 # 开发辅助文件（用户安装不需要）
-gen_lovehome_data.py
+gen_qlovehome_data.py
 extract_rooms.py
 calib_real.py
 calib_real.json
@@ -8,7 +8,7 @@ rooms_poly.json
 photo_outline.json
 missing_ents.json
 templates.yaml
-lovehome/
+qlovehome/
 .github/
 .gitignore
 screenshots/

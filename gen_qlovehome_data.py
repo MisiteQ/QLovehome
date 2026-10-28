@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""生成 QLovehome 数据层 (lovehome-data.js)：把 HA 里已有的实体按房间接线。
+"""生成 QLovehome 数据层 (qlovehome-data.js)：把 HA 里已有的实体按房间接线。
 
-只写静态配置；运行时的状态由 lovehome.js 通过同源 iframe 的 hass 读取。
+只写静态配置；运行时的状态由 qlovehome.js 通过同源 iframe 的 hass 读取。
 """
 # ═══════════════════════════════════════════════════════════════════
 #  接手这个模板（完整步骤见同目录 README.md）：
@@ -14,9 +14,9 @@
 #      b) ROOM_SENSOR：各房间温湿度计的两颗 sensor
 #      c) 文件下部的 dev(...) 设备清单与 DATA 字典（相机 / 网关 / 耗材 / 家电）
 #      d) SG_ACC：国网户号；没有 state_grid 集成就把 SG 开头的行全删掉
-#   ④ 跑 python gen_lovehome_data.py → 生成 lovehome/lovehome-data.js
-#   ⑤ 把 lovehome/ 传到 HA 的 /config/www/lovehome/，建 iframe 面板指向
-#      /local/lovehome/index.html?v=1
+#   ④ 跑 python gen_qlovehome_data.py → 生成 qlovehome/qlovehome-data.js
+#   ⑤ 把 qlovehome/ 传到 HA 的 /config/www/qlovehome/，建 iframe 面板指向
+#      /local/qlovehome/index.html?v=1
 #  占位实体命名规则：sensor.<房间或用途>_<读数>，例如 sensor.master_temperature。
 #  没有的实体删掉对应行即可，页面会自动降级，不会报错。
 # ═══════════════════════════════════════════════════════════════════
@@ -26,7 +26,7 @@ import math
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, 'lovehome', 'lovehome-data.js')
+OUT = os.path.join(HERE, 'qlovehome', 'qlovehome-data.js')
 
 # ── 房间：多边形取自用户在标注图上圈出的范围，画布 620x692 ─────
 # 坐标由 extract_rooms.py 从你标注好的户型图提取（rooms_poly.json）。
@@ -549,7 +549,7 @@ def dev(room, name, kind, entity, x=None, y=None, note='', ctl=None, fb=None):
 # ── 复合设备的弹窗配置 ────────────────────────────────────────
 # 结构：{'always':1（图标恒亮，不当成"关着"）, 'sub':副标题, 'open':列表按钮文案,
 #        'echo':[{e,map,pre,unit}]（标题栏那行摘要）, 'groups':[{t,hint,items:[...]}]}
-# item：k=seg|sel|num|sw|btn|lamp|ro|say|cam，其余字段见 lovehome.js 的 crow()
+# item：k=seg|sel|num|sw|btn|lamp|ro|say|cam，其余字段见 qlovehome.js 的 crow()
 # on：可选，指定「什么状态算这台设备正在用」，只影响户型图图标发不发亮（isGlow）。
 #     不配就按主实体的开关态（isOn）—— 晾衣架那种停在半空的会被判成"开着"，
 #     但拨过 on 就能说清"只有屏幕亮着才算在用"（中控面板）。
@@ -939,7 +939,7 @@ PSV = 'metering_strip'  # 带计量的插排
 POWER_ON_HINT = ('「默认上电状态」＝停电再来电时这路是开还是关；'
                  '「断电记忆」＝恢复停电前的样子')
 # 米家把定时做在云端（App 的「智能场景」里），HA 侧一个实体都没有，
-# 所以倒计时由页面自己实现：lovehome.js 会给**每一台可控设备**自动追加一张「定时」卡
+# 所以倒计时由页面自己实现：qlovehome.js 会给**每一台可控设备**自动追加一张「定时」卡
 # （见 timerCard），不用在这里逐个设备配置。
 TIMER_HINT = ('先选「关 / 开」，再选时长 → 到点自动执行。'
               '倒计时存在本机，刷新能续上；关页面太久（超过 1 分钟）的过期任务会直接丢弃')
@@ -1036,7 +1036,7 @@ def giot_ctl(pfx):
 def plug_ctl(pfx):
     """普通智能插座 / 插排（含三台 USB 通断器 —— 弱电箱 / 网络 / 服务器的风扇都接在这上面）
     HA 侧只有开关模式 + 默认上电状态两项设置；定时在米家云端，HA 拿不到实体，
-    所以由页面自己实现（见 lovehome.js 的 tickTimers）。"""
+    所以由页面自己实现（见 qlovehome.js 的 tickTimers）。"""
     return _ctl(
         always=False,
         sub='模式 · 上电状态 · 定时',
@@ -1661,8 +1661,8 @@ PHOTO_OUTLINE = ' '.join('%g,%g' % (round((ix - REAL_OX) / REAL_SX, 1),
 def _page_ver():
     """从 index.html 里抠出 ?v=N，给 plan-real.jpg 当缓存击穿参数。"""
     import re
-    idx = open(os.path.join(HERE, 'lovehome', 'index.html'), encoding='utf-8').read()
-    m = re.search(r'lovehome\.css\?v=(\d+)', idx)
+    idx = open(os.path.join(HERE, 'qlovehome', 'index.html'), encoding='utf-8').read()
+    m = re.search(r'qlovehome\.css\?v=(\d+)', idx)
     return m.group(1) if m else '0'
 
 
@@ -1983,8 +1983,8 @@ DATA = {
     ] + AC_APPLIANCES,
 }
 
-head = """/* LoveHome 数据层 · 由 .workbuddy/gen_lovehome_data.py 生成，勿手改
- * 实体均来自 HA 现有设备（按区域归属整理）；状态由 lovehome.js 同源读取 hass。
+head = """/* QLovehome 数据层 · 由 .workbuddy/gen_qlovehome_data.py 生成，勿手改
+ * 实体均来自 HA 现有设备（按区域归属整理）；状态由 qlovehome.js 同源读取 hass。
  */
 """
 body = 'window.LH = ' + json.dumps(DATA, ensure_ascii=False, indent=1) + ';\n'

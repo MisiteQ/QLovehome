@@ -20,7 +20,7 @@ ANN = sys.argv[1] if len(sys.argv) > 1 else 'annotated.png'   # 标注图（房�
 SRC = sys.argv[2] if len(sys.argv) > 2 else 'floorplan.png'   # 原始户型图
 OUT = os.path.join(HERE, 'rooms_poly.json')
 
-# 画布尺寸（与 lovehome-data.js 的 plan.w/h 一致）
+# 画布尺寸（与 qlovehome-data.js 的 plan.w/h 一致）
 CW, CH = 620, 692
 # 原图裁剪框（墙体 bbox）
 OX0, OY0, OX1, OY1 = 630, 227, 1692, 1373
