@@ -36,8 +36,6 @@ def schedule(entity_id: str, item: dict) -> None:
     except (TypeError, ValueError):
         return
     loop = asyncio.get_event_loop()
-    delay = end - loop.time() + (loop.time() - asyncio.get_event_loop().time())  # 占位
-    # 直接算 epoch → 相对延迟
     now_ts = datetime.now(timezone.utc).timestamp()
     delay_s = max(end - now_ts, 0)
 

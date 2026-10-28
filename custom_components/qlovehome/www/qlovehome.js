@@ -71,9 +71,19 @@
   function haToken() {
     try { return JSON.parse(localStorage.hassTokens).access_token || ''; } catch (e) { return ''; }
   }
+  /* Ingress 环境下 API base path = /api/hassio_ingress/<slug>，
+     Integration 模式下是空字符串（因为路由直接注册在 HA Core 的 /api/qlh/*） */
+  let _apiBaseCache = null;
+  function apiBase() {
+    if (_apiBaseCache != null) return _apiBaseCache;
+    const m = (window.location.pathname || '').match(/\/api\/hassio_ingress\/[^/]+/);
+    _apiBaseCache = m ? m[0] : '';
+    return _apiBaseCache;
+  }
   function apiFetch(path, opts) {
     const t = haToken();
-    return fetch(path, Object.assign({
+    const fullPath = apiBase() + path;
+    return fetch(fullPath, Object.assign({
       headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }
     }, opts || {}));
   }
