@@ -8,6 +8,11 @@ INTEGRATION_NAME = "QLovehome"   # 显示名称
 DATA_DIR_NAME = "qlh"
 DATA_FILE = "qlh-config.json"
 
+# 审计日志（操作记录）—— JSONL 格式，和配置同目录
+AUDIT_FILE = "qlh-audit.log"
+AUDIT_MAX_BYTES = 1_000_000       # 超过 1MB 轮转：qlh-audit.log → qlh-audit.log.1
+AUDIT_MAX_ENTRIES = 2000          # 读取接口最多返回最近 2000 条
+
 # 更早版本的位置（/config/lovehome/config.json）——首次读取时自动迁移过来
 LEGACY_STORAGE_DIR = "lovehome"
 LEGACY_CONFIG_FILE = "config.json"
@@ -17,6 +22,8 @@ PANEL_PATH = "qlovehome"         # 侧边栏 URL 路径
 API_URL = "/api/qlh/config"      # REST 兜底读写接口
 API_UI_URL = "/api/qlh/ui"       # REST 兜底读写「界面设置」
 API_TIMER_URL = "/api/qlh/timer" # REST 兜底读写「定时 / 倒计时」
+API_AUDIT_URL = "/api/qlh/audit" # REST 兜底读取「操作记录」
+API_SERVICE_URL = "/api/qlh/service"  # REST 兜底「设备操控（走后端记审计）」
 
 # 定时任务在 HA 服务器上跑（关面板 / 退出账号也照常执行）
 TIMER_KEY = "timers"                        # 配置文件里的段名

@@ -2388,10 +2388,10 @@
        </button>`).join('');
 
     form.innerHTML = `
-      <label>HA 实体（从真实设备里选，选完自动定类型和名字）
+      <label>HA 主实体（从真实设备里选，选完自动定类型和名字）
         <input id="dEntity" value="${(d.entity || '').replace(/"/g, '&quot;')}" placeholder="点击输入框从 HA 实体列表选择">
       </label>
-      <label>设备名称<input id="dName" value="${(d.name || '').replace(/"/g, '&quot;')}" placeholder="如：客厅主灯"></label>
+      <label>显示名称<input id="dName" value="${(d.name || '').replace(/"/g, '&quot;')}" placeholder="如：客厅主灯（会覆盖 HA 原生名称）"></label>
       <label>图标类型<span class="hint" style="margin-left:.4em">决定显示哪个图标，选实体后一般会自动选好</span>
         <div class="kind-row" id="dKindRow">${kindGrid}</div>
         <input type="hidden" id="dKind" value="${d.kind || 'light'}">
@@ -2405,7 +2405,24 @@
         <label>X 坐标<input id="dX" type="number" step="0.1" value="${d.x ?? ''}" placeholder="可选"></label>
         <label>Y 坐标<input id="dY" type="number" step="0.1" value="${d.y ?? ''}" placeholder="可选"></label>
       </div>
-      <label class="hint">坐标是户型图上的相对位置（画布 ${window.LH.plan ? window.LH.plan.w : 620}×${window.LH.plan ? window.LH.plan.h : 692}）。在「户型图」tab 点「+ 图上添加设备」可以点哪放哪，平时直接拖图标微调。</label>`;
+      <label class="hint">坐标是户型图上的相对位置（画布 ${window.LH.plan ? window.LH.plan.w : 620}×${window.LH.plan ? window.LH.plan.h : 692}）。在「户型图」tab 点「+ 图上添加设备」可以点哪放哪，平时直接拖图标微调。</label>
+      <hr style="border:none;border-top:1px dashed var(--bd2);margin:10px 0">
+      <label>子设备 / 附属实体 <span class="hint" style="margin-left:.4em">（如：热水器 → 水量传感器 / 零冷水开关）</span>
+        <div id="dChildrenWrap">
+          <div id="dChildrenList" class="lh-ent-group">
+            ${(d.children || []).map((c) => `
+              <div class="lh-child-row" data-child="${c}">
+                <code>${c}</code>
+                <button type="button" class="lh-child-del" title="移除">×</button>
+              </div>`).join('') || '<div class="hint" style="padding:4px 0">还没有绑定。下面添加的子设备不会单独出现在户型图上，只在控制面板里展示。</div>'}
+          </div>
+          <div class="lh-child-add">
+            <input id="dChildInput" placeholder="输入或选择一个 HA 实体（如 switch.xxx）">
+            <button type="button" id="dChildAdd" class="lh-ed-btn">添加</button>
+          </div>
+        </div>
+        <span class="hint">子设备绑定规则：灯只绑灯、窗帘只绑窗帘；热水器（climate 含热水器 / water_heater 域）可绑开关 / 传感器。绑定后子设备不在户型图上单独显示，只在主设备的控制面板里出现。</span>
+      </label>`;
 
     // 实体选择器 + 自动落位（Houseplan 式：选实体 → 自动定类型/名字）
     const pickerOpts = {
@@ -2469,6 +2486,56 @@
       d.kind = b.dataset.kind;
       $('#dKind', form).value = d.kind;
       $$('.kind-ico', form).forEach((x) => x.classList.toggle('on', x === b));
+    });
+
+    // 子设备绑定：实体选择器 + 添加/删除
+    if (!d.children) d.children = [];
+    const childInput = $('#dChildInput', form);
+    const childPicker = createEntityPicker(childInput, {
+      placeholder: '选一个实体绑到这台设备上',
+      onChange: () => { /* 选完不自动加，用户得点添加 */ }
+    });
+    function refreshChildList() {
+      const list = $('#dChildrenList', form);
+      if (!d.children.length) {
+        list.innerHTML = '<div class="hint" style="padding:4px 0">还没有绑定。下面添加的子设备不会单独出现在户型图上，只在控制面板里展示。</div>';
+        return;
+      }
+      list.innerHTML = d.children.map((c) => `
+        <div class="lh-child-row" data-child="${c}">
+          <code>${c}</code>
+          <button type="button" class="lh-child-del" title="移除">×</button>
+        </div>`).join('');
+      $$('.lh-child-del', list).forEach((btn, i) => {
+        btn.onclick = () => { d.children.splice(i, 1); refreshChildList(); };
+      });
+    }
+    refreshChildList();
+    $('#dChildAdd', form).onclick = () => {
+      const val = childInput.value.trim();
+      if (!val || !val.includes('.')) { toastHint('请输入有效的 entity_id（如 switch.xxx）', 1500); return; }
+      if (val === d.entity) { toastHint('不能把主实体自己绑成子设备', 1500); return; }
+      if (d.children.indexOf(val) >= 0) { toastHint('这个实体已经绑过了', 1500); return; }
+      // 绑定规则校验
+      const mainDom = (d.entity || '').split('.')[0];
+      const childDom = val.split('.')[0];
+      const isWaterHeater = mainDom === 'water_heater' ||
+        (mainDom === 'climate' && /热水器|water[_-]?heater/i.test((haStates()[d.entity] || {}).attributes || {}).join(' '));
+      const validPairs = { light: ['light'], cover: ['cover'], water_heater: ['switch', 'input_boolean', 'binary_sensor', 'sensor'] };
+      if (isWaterHeater) {
+        if (validPairs.water_heater.indexOf(childDom) < 0) {
+          toastHint('热水器只能绑开关 / 传感器（你选的是 ' + childDom + '）', 2000); return;
+        }
+      } else if (validPairs[mainDom] && validPairs[mainDom].indexOf(childDom) < 0) {
+        toastHint(mainDom + ' 只能绑同域子设备（你选的是 ' + childDom + '）', 2000); return;
+      }
+      d.children.push(val);
+      refreshChildList();
+      childInput.value = '';
+      if (childPicker.clear) childPicker.clear();
+    };
+    childInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); $('#dChildAdd', form).click(); }
     });
 
     devDialog.classList.add('open');

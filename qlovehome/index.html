@@ -89,6 +89,8 @@
   <symbol id="i-siren" viewBox="0 0 24 24"><circle cx="12" cy="13" r="5.6"/><path d="M12 4.4v3M6 5.8l2 2M18 5.8l-2 2"/><path d="M10 16.8v3h4v-3"/><path d="M4 18h16"/></symbol>
   <symbol id="i-leak" viewBox="0 0 24 24"><path d="M12 3c4 5 6 7.6 6 10.4a6 6 0 0 1-12 0C6 10.6 8 8 12 3z"/><path d="M12 13.5v2.5"/></symbol>
   <symbol id="i-presence" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-dasharray="2.4 1.8"/><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></symbol>
+  <!-- 最近动态：时钟指针 + 小圆点（表示事件） -->
+  <symbol id="i-log" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
 </svg>
 
 <main class="screen" id="screen">
@@ -186,6 +188,7 @@
       <button class="filter ptab active" data-page="home" type="button"><svg><use href="#i-home"/></svg><span>首页</span></button>
       <button class="filter ptab" data-pop="overview" type="button"><svg><use href="#i-bolt"/></svg><span>概览</span></button>
       <button class="filter ptab" data-pop="appliance" type="button"><svg><use href="#i-washer"/></svg><span>家电</span></button>
+      <button class="filter ptab" data-pop="audit" type="button"><svg><use href="#i-log"/></svg><span>最近动态</span></button>
     </div>
     <span class="fsep" aria-hidden="true"></span>
     <div class="fgroup" id="filterChips" role="group" aria-label="图层筛选"></div>

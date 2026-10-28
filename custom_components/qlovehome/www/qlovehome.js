@@ -83,7 +83,10 @@
     const h = hass();
     if (h && typeof h.callWS === 'function') {
       return h.callWS({ type: 'qlovehome/get_config' })
-        .then((r) => nonEmptyCfg(r && r.config))
+        .then((r) => {
+          if (r && r.version) window.LH.version = r.version;
+          return nonEmptyCfg(r && r.config);
+        })
         .catch(() => apiCfgLoad());
     }
     return apiCfgLoad();
@@ -99,7 +102,10 @@
     if (!haToken()) return Promise.resolve(undefined);
     return apiFetch('/api/qlh/config')
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((d) => nonEmptyCfg(d && d.config))
+      .then((d) => {
+        if (d && d.version) window.LH.version = d.version;
+        return nonEmptyCfg(d && d.config);
+      })
       .catch(() => undefined);
   }
   function remoteCfgSave(cfg) {
@@ -207,8 +213,8 @@
     try { h.callService(domain, service, data || {}); }
     catch (e) { toast('下发失败：' + e.message); }
   }
-  /* 控制下发：先说「已受理」，成功回读后再刷新；实体状态一直没变就如实提示 */
-  /* HA 抛回来的服务错误又长又难读（「无法执行动作 … code=-9999, button.xxx, 名字」），翻成人话 */
+
+  /* HA 抛回来的服务错误又长又难读，翻成人话 */
   function friendlyErr(msg) {
     const s = String(msg || '');
     if (/-9999|未知错误|unknown error/i.test(s)) return '设备拒绝了这次操作，多半是当前状态不允许';
@@ -217,32 +223,97 @@
     return s.replace(/\s+/g, ' ').slice(0, 48);
   }
 
+  /* ── 子设备自动隐藏：如果一台设备的 entity_id 被别的设备绑成了 children，
+     它就不该单独出现在户型图 / 房间面板 / 筛选列表里 —— 统一从视图剔除。
+     编辑器（qlovehome-editor.js）不走这里，它要看到全量让用户管理。 */
+  let _hiddenCache = null;
+  function hiddenEntities() {
+    if (_hiddenCache) return _hiddenCache;
+    const set = new Set();
+    (LH.devices || []).forEach((d) => {
+      (d.children || []).forEach((c) => { if (c) set.add(c); });
+    });
+    _hiddenCache = set;
+    return set;
+  }
+  // 配置变更时清缓存（编辑器保存后触发 QLOVEHOME_RERENDER）
+  window.addEventListener('QLOVEHOME_RERENDER', () => { _hiddenCache = null; });
+  window.addEventListener('QLOVEHOME_CONFIG_CHANGED', () => { _hiddenCache = null; });
+
+  function visibleDevices(arr) {
+    const src = arr || LH.devices || [];
+    const hidden = hiddenEntities();
+    return src.filter((d) => !d.entity || !hidden.has(d.entity));
+  }
+
+  /* ── 审计日志接口：读取最近动态 ── */
+  function apiAuditLoad(limit, event) {
+    if (!haToken()) return Promise.resolve(null);
+    const q = 'limit=' + (limit || 50) + (event ? '&event=' + encodeURIComponent(event) : '');
+    return apiFetch('/api/qlh/audit?' + q)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => (d && d.entries) || [])
+      .catch(() => null);
+  }
+  function serverAuditLoad(limit, event) {
+    const h = hass();
+    if (h && typeof h.callWS === 'function') {
+      return h.callWS({ type: 'qlovehome/get_audit', limit: limit || 50, event: event || null })
+        .then((r) => (r && r.entries) || [])
+        .catch(() => apiAuditLoad(limit, event));
+    }
+    return apiAuditLoad(limit, event);
+  }
+
+  /* 控制下发：走后端 service_call（自动记审计日志），失败回落到直接 hass.callService */
   function sendControl(domain, service, data, label) {
     const h = hass();
     if (!h) { toast('还没连上 HA'); return; }
     const ent = (data || {}).entity_id;
     const before = ent ? st(ent) : null;
-    let p = null;
-    try { p = h.callService(domain, service, data || {}); }
-    catch (e) { toast('下发失败 · ' + friendlyErr(e.message)); return; }
-    const settle = () => {
-      setTimeout(() => { paintMarkers(); paintGlow(); refreshRoom(); refreshControl(); }, 800);
-      if (!before) return;
-      setTimeout(() => {
-        const now = st(ent);
-        if (!now) return;
-        const same = now.state === before.state &&
-          JSON.stringify(now.attributes || {}) === JSON.stringify(before.attributes || {});
-        if (same) toast(label + ' · 未观察到状态变化，执行结果未知');
-      }, 5000);
+
+    // ★ 优先走后端 service_call（自动记审计日志）
+    const viaBackend = () => {
+      const body = { domain, service, service_data: data || {}, label: label || '' };
+      const viaWS = () => h.callWS({ type: 'qlovehome/service_call', ...body }).then((r) => r && r.ok);
+      const viaREST = () => apiFetch('/api/qlh/service', { method: 'POST', body: JSON.stringify(body) })
+        .then((r) => (r.ok ? r.json() : { ok: false })).then((d) => d && d.ok);
+
+      let p;
+      if (typeof h.callWS === 'function') {
+        p = viaWS().catch(() => viaREST());
+      } else {
+        p = viaREST();
+      }
+      p = p.catch(() => false);
+
+      const settle = () => {
+        setTimeout(() => { paintMarkers(); paintGlow(); refreshRoom(); refreshControl(); }, 800);
+        if (!before) return;
+        setTimeout(() => {
+          const now = st(ent);
+          if (!now) return;
+          const same = now.state === before.state &&
+            JSON.stringify(now.attributes || {}) === JSON.stringify(before.attributes || {});
+          if (same) toast((label || '操作') + ' · 未观察到状态变化，执行结果未知');
+        }, 5000);
+      };
+      p.then((ok) => {
+        if (ok) {
+          toast((label || '操作') + ' · 已受理');
+          settle();
+        } else {
+          // 后端失败 → 回落到直接 hass.callService
+          console.warn('[QLovehome] 后端 service_call 失败，回落到直接 hass.callService');
+          try { h.callService(domain, service, data || {}); }
+          catch (e) { toast('下发失败 · ' + friendlyErr(e.message)); return; }
+          toast((label || '操作') + ' · 已下发');
+          settle();
+        }
+      });
     };
-    if (p && typeof p.then === 'function') {
-      toast(label + ' · 已受理');
-      p.then(settle).catch((e) => toast('下发失败 · ' + friendlyErr((e && e.message) || '服务未响应')));
-    } else {
-      toast(label + ' · 已下发');
-      settle();
-    }
+
+    viaBackend();
   }
 
   /* ── 定时 / 倒计时（v300）─────────────────────────────────────────
@@ -491,6 +562,7 @@
     windy: '大风', 'windy-variant': '大风', exceptional: '异常'
   };
   const HVAC = { off: '已关闭', heat: '制热', cool: '制冷', dry: '除湿', fan_only: '送风', auto: '自动', unavailable: '离线', idle: '待机' };
+  const SWING = { off: '关闭', both: '同时', horizontal: '左右', vertical: '上下' };
   const PRESET = { none: '无', comfort: '舒适', eco: '节能', boost: '强劲', sleep: '睡眠', away: '离家', home: '在家', activity: '活动', posterior_wash: '臀洗', feminine_wash: '妇洗', air_dry: '烘干', stop: '停止', washing: '冲洗', drying: '烘干' };
   /* 通用翻译：任何 domain 的 select 选项查不到专用表时，退回这里 */
   const ALIAS_MAP = {
@@ -854,7 +926,7 @@
     siren: 'i-siren',
   };
   const GLOW_KINDS = { light: 1 };
-  const markers = () => LH.devices.filter((d) => d.x != null);
+  const markers = () => visibleDevices().filter((d) => d.x != null);
 
   /** 多边形转圆角路径：每个顶点按两侧边长取内切半径，用二次贝塞尔倒角。 */
   function roundPath(points, r) {
@@ -1439,7 +1511,7 @@
       glow.setAttribute('clip-path', `url(#rclip-${r.id})`);
       glow.setAttribute('pointer-events', 'none');
       glow.dataset.room = r.id;
-      LH.devices.filter((d) => d.room === r.id && GLOW_KINDS[d.kind] && d.x != null).forEach((d) => {
+      visibleDevices().filter((d) => d.room === r.id && GLOW_KINDS[d.kind] && d.x != null).forEach((d) => {
         const c = document.createElementNS(NS, 'circle');
         c.setAttribute('cx', d.x);
         c.setAttribute('cy', d.y);
@@ -1600,7 +1672,7 @@
 
   /* 没上户型图的设备（x/y 为空）：只能从「其他」里找到 */
   function looseDevs() {
-    return LH.devices.filter((d) => d.x == null || d.y == null);
+    return visibleDevices().filter((d) => d.x == null || d.y == null);
   }
 
   function buildSide() {
@@ -1654,7 +1726,7 @@
     if (!box) return;
     box.querySelectorAll('.side-stat').forEach((row) => {
       const k = row.dataset.kind;
-      const all = LH.devices.filter((d) => d.kind === k);
+      const all = visibleDevices().filter((d) => d.kind === k);
       const on = all.filter(isOn).length;
       row.querySelector('b').textContent = on;
       row.querySelector('b').classList.toggle('on', on > 0);
@@ -1675,7 +1747,7 @@
       const hv = r.hum ? num(r.hum, null) : null;
       b.querySelector('b').textContent =
         tv == null ? (hv == null ? '—' : Math.round(hv) + '%') : tv.toFixed(1) + '°';
-      const lit = LH.devices.some((d) => d.room === r.id && GLOW_KINDS[d.kind] && isOn(d));
+      const lit = visibleDevices().some((d) => d.room === r.id && GLOW_KINDS[d.kind] && isOn(d));
       b.querySelector('em').classList.toggle('warm', lit);
       if (lit) reach += 1;
       b.classList.toggle('active', state.room === r.id);
@@ -1846,7 +1918,7 @@
     if (ap) ap.hidden = true;
     const tv = r.temp ? num(r.temp, null) : null;
     const hv = r.hum ? num(r.hum, null) : null;
-    const roomDevs = LH.devices.filter((d) => d.room === id);
+    const roomDevs = visibleDevices().filter((d) => d.room === id);
     const roomRos = LH.readouts.filter((x) => x.room === id);
     /* 底部筛选同样作用于房间面板：只列当前类型的设备 */
     const list = state.filter === 'all' ? roomDevs : roomDevs.filter(matchFilter);
@@ -3303,6 +3375,7 @@
     const modes = a.hvac_modes || [];
     const fans = a.fan_modes || [];
     const presets = a.preset_modes || [];
+    const swings = a.swing_modes || [];
     const box = el('div', 'ctl');
     box.innerHTML =
       ctlHead(d) +
@@ -3320,8 +3393,10 @@
         ? `<div class="ctl-row sub">${fans.map((m) => `<button data-fan="${m}" type="button">${tr(FAN, m)}</button>`).join('')}</div>` : '') +
       (presets.length
         ? `<div class="ctl-row sub">${presets.map((m) => `<button data-preset="${m}" type="button">${tr(PRESET, m)}</button>`).join('')}</div>` : '') +
+      (swings.length
+        ? `<div class="ctl-row sub">${swings.map((m) => `<button data-swing="${m}" type="button">${tr(SWING, m)}</button>`).join('')}</div>` : '') +
       '<div class="ctl-foot"><button class="wide" id="ctlPower" type="button">开机 / 关机</button></div>' +
-      (canTemp ? `<div class="ctl-note">温度范围 ${lo}–${hi}°，模式 / 风速 / 预设都取实体自己上报的清单，页面不硬凑选项。</div>` : '');
+      (canTemp ? `<div class="ctl-note">温度范围 ${lo}–${hi}°，模式 / 风速 / 预设 / 扫风都取实体自己上报的清单，页面不硬凑选项。</div>` : '');
     box.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => {
       const a2 = (st(d.entity) || { attributes: {} }).attributes || {};
       const stp = a2.target_temp_step || step;
@@ -3341,6 +3416,10 @@
     $$('[data-preset]', box).forEach((b) => b.addEventListener('click', () => {
       sendControl('climate', 'set_preset_mode', { entity_id: d.entity, preset_mode: b.dataset.preset }, '预设 ' + tr(PRESET, b.dataset.preset));
       $$('[data-preset]', box).forEach((x) => x.classList.toggle('on', x === b));
+    }));
+    $$('[data-swing]', box).forEach((b) => b.addEventListener('click', () => {
+      sendControl('climate', 'set_swing_mode', { entity_id: d.entity, swing_mode: b.dataset.swing }, '扫风 ' + tr(SWING, b.dataset.swing));
+      $$('[data-swing]', box).forEach((x) => x.classList.toggle('on', x === b));
     }));
     wireCtl(box, d);
     return box;
@@ -3747,7 +3826,7 @@
 
   /* ── 类别列表：左栏「灯光 5/26」这类统计点进去看全部，开关直接下发 ── */
   function openKind(kind) {
-    const all = LH.devices.filter((d) => d.kind === kind);
+    const all = visibleDevices().filter((d) => d.kind === kind);
     if (!all.length) { toast('这个类别还没有上图设备'); return; }
     clearInterval(state.kindTimer);
     const sub = () => all.filter(isOn).length + ' / ' + all.length + ' 开启 · 点条目看详情';
@@ -4303,6 +4382,175 @@
       '<div class="ctl-note">这里只展示读数。没有绑定真实实体的项目，页面不会假装它已接入。</div>';
   }
 
+  /* ── 最近动态（操作记录 / 审计日志）──────────────────────────────
+     数据来自后端 qlh-audit.log（JSONL，每行一条），前端只负责拉取 + 格式化显示。
+     ★ 筛选规则：单一过滤函数 filterAudit + 单一刷新入口 refreshAudit
+       任何改变筛选条件的事件（tab 切换、自动刷新）都只调 refreshAudit()
+     事件类型（前后端枚举一致，来自后端 audit_write 的 event 值）：
+       service_call → 设备操控
+       timer_set    → 定时已设
+       timer_clear  → 定时取消
+       timer_fired  → 定时到点
+  */
+  const AUDIT_EVENT_LABEL = {
+    service_call: '设备操控',
+    timer_set: '定时已设',
+    timer_clear: '定时取消',
+    timer_fired: '定时到点',
+  };
+  // 筛选 tab 白名单（前后端枚举一致）
+  const AUDIT_FILTERS = [
+    { id: 'all',          label: '全部' },
+    { id: 'service_call', label: '设备操控', event: 'service_call' },
+    { id: 'timer',        label: '定时相关', events: ['timer_set', 'timer_clear', 'timer_fired'] },
+  ];
+  const AUDIT_DOMAIN_ICON = {
+    climate: 'i-snow', light: 'i-bulb', switch: 'i-plug', fan: 'i-fan',
+    cover: 'i-cover', media_player: 'i-media', water_heater: 'i-tap',
+    humidifier: 'i-siren', lock: 'i-lock', vacuum: 'i-vacuum',
+  };
+  // 单一数据源 + 单一刷新入口
+  let _auditAll = [];          // 全量原始数据（缓存，不随筛选变）
+  let _auditFilter = 'all';    // 当前筛选
+  function openAudit() {
+    showLayer('最近动态', '设备操控 · 定时 · 到点执行 —— 全部自动记录在 HA 服务器', 'pop-wide');
+    $('#layerBody').innerHTML = `
+      <div class="audit-tabs" id="auditTabs">
+        ${AUDIT_FILTERS.map((f) =>
+          `<button type="button" class="audit-tab${_auditFilter === f.id ? ' on' : ''}" data-audit-filter="${f.id}">${f.label}</button>`
+        ).join('')}
+        <button type="button" class="audit-refresh" id="auditRefresh" title="立即刷新">↻</button>
+      </div>
+      <div id="auditBox" class="audit-box"><div class="we-empty">加载中…</div></div>
+    `;
+    // tab 切换事件 → 统一刷新入口
+    $$('.audit-tab').forEach((btn) => btn.addEventListener('click', () => {
+      _auditFilter = btn.dataset.auditFilter;
+      $$('.audit-tab').forEach((x) => x.classList.toggle('on', x === btn));
+      refreshAudit();
+    }));
+    $('#auditRefresh').addEventListener('click', () => {
+      serverAuditLoad(100).then((entries) => { _auditAll = entries || []; refreshAudit(); });
+    });
+    // 首次加载
+    serverAuditLoad(100).then((entries) => { _auditAll = entries || []; refreshAudit(); });
+    // 定时刷新 → 单一刷新入口
+    clearInterval(state.pageTimer);
+    state.pageTimer = setInterval(() => {
+      if (!state.layer || !$('#auditBox')) return clearInterval(state.pageTimer);
+      serverAuditLoad(100).then((entries) => { _auditAll = entries || []; refreshAudit(); });
+    }, 20000);
+  }
+  /* 单一过滤函数：把全量数据按当前筛选条件过滤 */
+  function filterAudit(all) {
+    if (!all || !all.length) return [];
+    const cfg = AUDIT_FILTERS.find((f) => f.id === _auditFilter);
+    if (!cfg || cfg.id === 'all') return all;
+    if (cfg.event) return all.filter((e) => e.event === cfg.event);
+    if (cfg.events) {
+      const set = new Set(cfg.events);
+      return all.filter((e) => set.has(e.event));
+    }
+    return all;
+  }
+  /* 单一刷新入口：先过滤，再渲染 */
+  function refreshAudit() {
+    const box = $('#auditBox');
+    if (!box) return;
+    const entries = filterAudit(_auditAll);
+    renderAuditBox(entries);
+  }
+  function renderAuditBox(entries) {
+    const box = $('#auditBox');
+    if (!box) return;
+    if (!entries || !entries.length) {
+      const hint = _auditFilter === 'all'
+        ? '还没有操作记录 · 你刚刚对设备的任何操控（开关灯、调空调温度、设定时）都会自动记录到这里'
+        : '当前筛选条件下没有记录 · 试试切到「全部」';
+      box.innerHTML = '<div class="we-empty">' + hint + '</div>';
+      return;
+    }
+    // 按事件类型分组用于统计条
+    const groups = {};
+    entries.forEach((e) => {
+      const g = e.event || 'unknown';
+      (groups[g] = groups[g] || []).push(e);
+    });
+    const rows = entries.map((e) => auditRow(e)).join('');
+    const filterLabel = (AUDIT_FILTERS.find((f) => f.id === _auditFilter) || {}).label || '全部';
+    const stats = `<div class="audit-stats">
+      <span>${filterLabel} · <b>${entries.length}</b> 条</span>
+      ${Object.keys(groups).length > 1
+        ? '<span class="audit-sep">·</span>' + Object.keys(groups).map((k) =>
+            `<span>${AUDIT_EVENT_LABEL[k] || k} <b>${groups[k].length}</b></span>`
+          ).join('<span class="audit-sep">·</span>')
+        : ''}
+    </div>`;
+    box.innerHTML = stats + '<div class="audit-list">' + rows + '</div>';
+  }
+  function auditRow(e) {
+    const time = fmtAuditTime(e.time);
+    const ev = e.event || 'unknown';
+    const label = AUDIT_EVENT_LABEL[ev] || ev;
+    // 实体名：优先从 d.entities 里找 customName 覆盖，回落到 HA friendly_name 或 entity_id
+    let entName = e.entity_id || '';
+    const stInfo = entName ? st(entName) : null;
+    if (stInfo && stInfo.attributes) entName = stInfo.attributes.friendly_name || entName;
+    // 事件详情文字
+    let detail = '';
+    let domain = e.domain || (entName.split('.')[0]);
+    if (ev === 'service_call') {
+      const svc = e.service || '';
+      const actionMap = {
+        turn_on: '开启', turn_off: '关闭', open_cover: '打开', close_cover: '关闭',
+        stop_cover: '停止', toggle: '切换', set_temperature: '温度 ' + (e.data && e.data.temperature != null ? e.data.temperature + '°' : ''),
+        set_hvac_mode: (e.data && e.data.hvac_mode ? HVAC[e.data.hvac_mode] + '模式' : '模式变更'),
+        set_fan_mode: (e.data && e.data.fan_mode ? '风速 ' + (FAN[e.data.fan_mode] || e.data.fan_mode) : ''),
+        set_preset_mode: (e.data && e.data.preset_mode ? '预设 ' + (PRESET[e.data.preset_mode] || e.data.preset_mode) : ''),
+        set_cover_position: '位置 ' + (e.data && e.data.position != null ? e.data.position + '%' : ''),
+        turn_on_with_timer: '',
+      };
+      detail = actionMap[svc] || (svc.replace(/_/g, ' '));
+      if (e.label) detail = e.label;  // 前端传的友好 label 优先
+    } else if (ev === 'timer_set') {
+      detail = `定时 ${e.act === 'on' ? '开启' : '关闭'} ${e.mins || '?'} 分钟后`;
+      if (e.name) entName = e.name;
+    } else if (ev === 'timer_clear') {
+      detail = '用户取消';
+    } else if (ev === 'timer_fired') {
+      detail = `${e.act === 'on' ? '开启' : '关闭'} · ${e.fired ? '已执行' : '本来就是这个状态'}`;
+      if (e.name) entName = e.name;
+    }
+    // 图标
+    const icon = AUDIT_DOMAIN_ICON[domain] || 'i-plug';
+    return `<div class="audit-row">
+      <div class="audit-time">${time}</div>
+      <div class="audit-ico"><svg><use href="#${icon}"/></svg></div>
+      <div class="audit-info">
+        <div class="audit-main"><b>${entName || '—'}</b><span class="audit-tag audit-${ev}">${label}</span></div>
+        <div class="audit-sub">${detail}${e.entity_id ? `<code>${e.entity_id}</code>` : ''}</div>
+      </div>
+    </div>`;
+  }
+  function fmtAuditTime(iso) {
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      const now = new Date();
+      const diff = (now - d) / 1000;
+      if (diff < 60) return '刚刚';
+      if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+      if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+      // 今天 / 昨天 / 更早 → 显示具体时间
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const hh = pad(d.getHours()), mm = pad(d.getMinutes());
+      if (day.getTime() === today.getTime()) return '今天 ' + hh + ':' + mm;
+      if (day.getTime() === today.getTime() - 86400000) return '昨天 ' + hh + ':' + mm;
+      return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hh + ':' + mm;
+    } catch (e) { return iso || ''; }
+  }
+
   /* ── 外观设置（右上角齿轮弹窗独用；说明页删掉后就只剩这一处） ── */
   function settingsHtml() {
     const ids = {
@@ -4470,7 +4718,7 @@
         <div class="about-logo"><img src="./QLovehome.png" alt="QLoveHome"></div>
         <div class="about-meta">
           <div class="about-name">QLoveHome · 全屋大屏</div>
-          <div class="about-ver">版本 <b>1.0.0</b></div>
+          <div class="about-ver">版本 <b>${window.LH.version || '0.0.0'}</b></div>
         </div>
       </div>
       <ul>
@@ -5759,6 +6007,7 @@
     $$('.ptab').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.pop === 'overview') openOverview();
       else if (b.dataset.pop === 'appliance') openAppliances();
+      else if (b.dataset.pop === 'audit') openAudit();
       else resetView();          /* 首页 = 把显示状态复位到刚登录那样 */
     }));
 

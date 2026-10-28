@@ -1,10 +1,8 @@
 # QLoveHome · 使用帮助（详细版）
 
-> **适用版本**：v1.1.0  
+> **适用版本**：v1.4.0  
 > **适用人群**：Home Assistant 2024.6+ 用户  
 > **前置条件**：已安装 Home Assistant，有一台平板（门口 / 客厅常亮）
-
-> ⚠️ **v1.0.1 用户请升级**：v1.1.0 新增了「从 HA 批量导入实体」功能，**强烈建议升级**，比手动改 Python 脚本省事 10 倍。
 
 ---
 
@@ -12,17 +10,18 @@
 
 1. [这套面板能做什么？](#1-这套面板能做什么)
 2. [快速安装（10 分钟）](#2-快速安装10-分钟)
-   - 方式 A：HACS 一键（推荐）
-   - 方式 B：手动复制（不想装 HACS）
-   - 方式 C：纯 iframe（最简，但不能用编辑器）
+   - 方式 A：HAOS Add-on（推荐）
+   - 方式 B：HACS Integration
+   - 方式 C：纯 iframe（最简，但功能受限）
 3. [接线：把你的设备接进来](#3-接线把你的设备接进来)
-   - ⭐ 方式 A：编辑器批量导入（推荐，v1.1.0+）
-   - 方式 B：改 gen_lovehome_data.py（进阶）
+   - ⭐ 方式 A：编辑器批量导入（推荐）
+   - 方式 B：改 gen_qlh_data.py（进阶）
    - 实体 ID 怎么找
 4. [换户型](#4-换户型)
 5. [主题与个性化](#5-主题与个性化)
 6. [可视化编辑器](#6-可视化编辑器)
-7. [常见问题排错](#7-常见问题排错)
+7. [最近动态（最近操作记录）](#7-最近动态最近操作记录)
+8. [常见问题排错](#8-常见问题排错)
 
 ---
 
@@ -35,57 +34,54 @@
 | **户型图** | 矢量渲染的房间布局，墙体自动融合；点房间看温湿度和中控 |
 | **右栏** | 常用设备快捷开关 + 安防网关在线状态 |
 | **概览面板** | 家人在线 · 用电 · 安防 · 各屋温湿度 · 电池电量 · 摄像头 · 网络 · 系统 |
-| **家电页** | 按品牌 / 类型聚合，灯、插座、空调、风扇、窗帘统一开关调光 |
+| **家电页** | 按类型聚合，灯、插座、空调（含扫风）、风扇、窗帘统一开关调光 |
+| **最近动态** | 自动记录设备操控 / 定时设置 / 定时到点执行，JSONL 存服务器 |
 | **屏保** | 无操作自动进大屏时钟，触控 / 键盘 / 滚轮任意操作唤醒 |
 
-**零 YAML、零 Lovelace 配置、零 Webpack。** 纯 HTML + SVG + JS iframe，读 `parent.hass` 拿状态、调服务。
+**零 YAML、零 Lovelace 配置、零 Webpack。** 纯 HTML + SVG + JS iframe。
 
 ---
 
 ## 2. 快速安装（10 分钟）
 
-### 方式 A：HACS 一键（推荐）
+### 方式 A：HAOS Add-on（推荐）
 
-如果你已经装了 HACS：
+如果你跑的是 HAOS（官方镜像、OVA、树莓派官方安装），Supervisor 一键装：
+
+1. **Home Assistant → 设置 → 加载项 → 右上角 ⋮ → 添加加载项仓库**
+2. URL：`https://github.com/MisiteQ/QLovehome`
+3. 类别：**Home Assistant** → 添加
+4. 列表里找到 **QLovehome** → 点 **安装**（首次构建约 3-5 分钟）
+5. 完成后侧边栏自动出现 **QLovehome** 🎉
+
+> 💡 Add-on 后端是独立 Python 进程，通过 HA WebSocket API 连接本机 HA（令牌由 Supervisor 自动注入），配置和审计日志存在 `/data/` 目录。HA 重启后定时任务自动恢复。
+
+### 方式 B：HACS Integration
+
+如果你不是 HAOS（Docker / venv / core 单独跑），用 HACS：
 
 1. **HACS → 集成 → 右上角 ⋮ → 自定义存储库**
 2. URL：`https://github.com/MisiteQ/QLovehome`
 3. 类别：**集成**
-4. 搜索 "QLoveHome" → 点 **下载** → 完成后点 **重载**
-5. **设置 → 设备与服务 → 添加集成 → QLoveHome** → 按向导选 dashboard
-6. 回到 Dashboard，应该会自动出现一个 QLoveHome 卡片。如果没有，手动加「网页卡片（iframe）」→ 地址填：
-   ```
-   /api/lovelace/lovehome/
-   ```
-7. 开爽 🎉
+4. 搜索 "QLovehome" → **下载** → 完成后 **重载**
+5. **设置 → 设备与服务 → 添加集成 → QLovehome** → 点「提交」
+6. 侧边栏自动出现入口。如果没出现 → Dashboard 手动加 iframe 卡片 → `/qlovehome/www/index.html`
 
-### 方式 B：手动复制（不想装 HACS）
+### 方式 C：纯 iframe（最简，但功能受限）
 
-```bash
-# Windows PowerShell（把 d:\CODE\QLovehome 换成你解压的路径）
-Copy-Item -Recurse -Force "d:\CODE\QLovehome\custom_components\lovehome" "C:\Users\<你>\.homeassistant\custom_components\"
-
-# 或 Linux / macOS / HAOS（进入 HA 的 shell 执行）
-cp -r custom_components/lovehome/ /config/custom_components/
-```
-
-然后**重启 HA**，按方式 A 的第 5-6 步走。
-
-### 方式 C：纯 iframe（最简，但不能用编辑器）
-
-如果你只是想快速看看效果，不需要 HA 集成：
+如果不想装任何后端组件，只想看效果：
 
 ```bash
 # 把前端文件复制到 HA 的 www 目录
-cp -r custom_components/lovehome/www/ /config/www/lovehome/
+cp -r custom_components/qlovehome/www/ /config/www/qlovehome/
 ```
 
 Dashboard → **网页卡片（iframe）** → 地址：
 ```
-/local/lovehome/index.html
+/local/qlovehome/index.html
 ```
 
-> 这种方式跳过了 config_flow，无法自动注册 panel_custom，编辑器的"保存到 HA 配置"按钮也不会生效。但不影响主界面展示和设备控制。
+> ⚠️ 这种方式**没有后端**，配置只存浏览器 localStorage（换浏览器/清缓存会丢），定时任务不会在后台执行。不推荐长期用。
 
 ---
 
@@ -208,7 +204,7 @@ python gen_lovehome_data.py
 
 主界面左下角有个编辑图标（铅笔），点进去进入编辑器。
 
-### 🆕 批量导入 HA 实体（v1.1.0+）
+### 🆕 批量导入 HA 实体
 
 设备 tab 顶部有个大按钮 **🔍 从 HA 批量导入**。这是最快的设备绑定方式——不用手敲 entity_id。
 
@@ -217,6 +213,14 @@ python gen_lovehome_data.py
 - 勾选想要的 → 导入后自动推断设备类型 + 取 friendly_name 当名字
 - 已在面板里的实体灰掉禁用，避免重复
 - 传感器 / 自动化 / script / scene 等不进列表（不是可控制设备）
+
+### 子设备绑定（v1.4.0+）
+
+热水器、主灯组这类设备，编辑器设备对话框里有 **「子设备 / 附属实体」** 区域：
+
+- 给热水器绑水量传感器 / 零冷水开关 → 这些传感器只在控制面板里展示，不单独出现在户型图
+- 主灯绑子灯 → 子灯自动从户型图剔除，只在主灯面板显示
+- 绑定规则：灯只绑灯、窗帘只绑窗帘、热水器可绑开关/传感器
 
 ### 设备 tab 实时状态
 
@@ -252,7 +256,39 @@ python gen_lovehome_data.py
 
 ---
 
-## 7. 常见问题排错
+## 7. 最近动态（最近操作记录）
+
+底部 tab 栏新增 **「最近动态」** 按钮，点进去会看到自动记录的所有操作。
+
+### 能看到什么
+
+| 事件类型 | 含义 | 例子 |
+|---|---|---|
+| 🟦 **设备操控** | 你或自动化对设备的每次操作 | 客厅空调调到 26°、关灯、打开门锁 |
+| 🟧 **定时已设** | 你在面板上设的定时 | 客厅主灯 30 分钟后关 |
+| 🟥 **定时取消** | 你手动取消了定时 | — |
+| 🟩 **定时到点** | 定时到点自动执行 | 空调自动关闭（已执行）|
+
+### 怎么用
+
+1. 底部 tab 栏点 **「最近动态」**
+2. 顶部切换 tab：**全部 / 设备操控 / 定时相关**
+3. 每 20 秒自动刷新，也可以点 ↻ 立即刷新
+4. 每条记录显示相对时间（刚刚 / N 分钟前 / 今天 HH:mm / 昨天 / 更早）
+
+### 存储方式
+
+- 后端 JSONL 文件：Add-on 存 `/data/qlh-audit.log`，Integration 存 `qlh/qlh-audit.log`
+- 每行一条 JSON，超过 1MB 自动轮转备份（`.log → .log.1`）
+- Supervisor 定期备份 `/data/` 目录 → HA 恢复后历史记录不丢
+
+### 关联逻辑
+
+每条记录直接存 `entity_id` + `service` + `data`，前端通过 entity_id 在已加载的 HA 实体状态里查 friendly_name 显示。找不到就显示原始 entity_id，不会空。
+
+---
+
+## 8. 常见问题排错
 
 | 现象 | 原因 | 解决 |
 |---|---|---|

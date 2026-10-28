@@ -61,12 +61,26 @@ QLovehome（**其爱家** 哈哈哈）是怎么来的？
 
 ## 🚀 安装
 
-### ⚠️ v1.0.0 升级到 v1.0.1
+### ⭐ 方式一：HAOS Add-on（推荐）
 
-v1.0.0 的 `__init__.py` 在 HAOS 上 setup 会报错（`panel_custom` API 签名变了）。**v1.0.1 已修复**。
-如果你之前装过 v1.0.0：**卸载旧版本 → 重新安装 v1.0.1**，或者手动替换 `__init__.py` + 重启 HA。
+**Home Assistant → 设置 → 加载项 → 右上角 ⋮ → 添加加载项仓库**
 
-### 方式一：HACS 自定义存储库（推荐）
+URL：
+```
+https://github.com/MisiteQ/QLovehome
+```
+
+类别选：**Home Assistant** → 添加 → 列表里找到 **QLovehome** → **安装**
+
+- Supervisor 自动构建（首次约 3-5 分钟）
+- 安装完成后侧边栏自动出现 **QLovehome**
+- 前端 + 后端独立进程，HA 重启后自动恢复定时任务
+
+> 💡 详细 Add-on 说明见 [`qlovehome_addon/README.md`](qlovehome_addon/README.md)
+
+### 方式二：HACS 自定义存储库（Integration 模式）
+
+如果不想用 Supervisor Add-on，也可以装成标准 HA 集成：
 
 1. **HACS → 集成 → 右上角 ⋮ → 自定义存储库**
 2. URL 填：`https://github.com/MisiteQ/QLovehome`
@@ -79,7 +93,7 @@ v1.0.0 的 `__init__.py` 在 HAOS 上 setup 会报错（`panel_custom` API 签�
      /qlovehome/www/index.html
      ```
 
-### 方式二：纯 iframe（最简）
+### 方式三：纯 iframe（最简）
 
 ```bash
 # 复制前端文件到 HA www 目录
@@ -89,14 +103,6 @@ cp -r custom_components/qlovehome/www/ /config/www/qlovehome/
 Dashboard → 网页卡片（iframe）→ 地址：
 ```
 /local/qlovehome/index.html
-```
-
-### 方式三：手动复制集成
-
-```bash
-# 复制整个集成目录
-cp -r custom_components/qlovehome/ /config/custom_components/
-# 重启 HA
 ```
 
 ---
@@ -165,43 +171,46 @@ python gen_qlovehome_data.py
 ```
 QLovehome/
 ├── .github/workflows/validate.yaml   # CI: HACS + Python + JS 语法校验
-├── .gitignore                        # Git 忽略规则
-├── .hacsignore                       # HACS 下载包过滤
+├── .gitignore
+├── .hacsignore
 │
-├── custom_components/qlovehome/       # ⭐ HA 自定义集成
-│   ├── __init__.py                    # integration 注册
-│   ├── config_flow.py                 # HA 配置向导
-│   ├── const.py                       # 常量
-│   ├── manifest.json                  # 集成元信息（version / domain）
-│   ├── strings.json                   # 配置向导文案
-│   ├── translations/                  # 多语言（en / zh-Hans）
-│   └── www/                           # 前端静态文件（HACS 部署用）
-│       ├── index.html
-│       ├── qlovehome.js                # 主界面 + 几何算法
-│       ├── qlovehome-editor.js         # 可视化编辑器
-│       ├── qlovehome.css               # 全部样式 + 四季主题
-│       ├── qlovehome-data.js           # 数据层（gen 脚本生成）
-│       ├── QLovehome.png              # 项目图标
-│       └── assets/                    # 背景图（bg-day / bg-night / plan-real）
+├── qlovehome_addon/                  # ⭐ HAOS Add-on（推荐）
+│   ├── config.yaml                   #   Add-on 元数据（slug/ingress/架构）
+│   ├── Dockerfile                    #   HA 基础镜像 + Alpine 预编译 aiohttp
+│   ├── run.sh                        #   入口脚本（bashio 自动注入环境变量）
+│   ├── repository.yaml               #   Add-on 仓库描述
+│   ├── README.md                     #   Add-on 专用说明页
+│   ├── www/                          #   前端静态文件（自包含）
+│   │   ├── index.html · qlovehome.js · qlovehome-editor.js
+│   │   ├── qlovehome.css · qlovehome-data.js · QLovehome.png
+│   │   └── assets/
+│   └── server/                       #   独立 Python 后端（aiohttp）
+│       ├── __main__.py               #     python -m server 入口
+│       ├── app.py                    #     REST API + 静态文件托管
+│       ├── ha.py                     #     HA WebSocket 连接层
+│       ├── store.py                  #     配置 / 审计日志 / 版本持久化
+│       └── timer.py                  #     独立 asyncio 定时调度
 │
-├── qlovehome/                        # 前端源码（开发用，同步到 www/）
+├── custom_components/qlovehome/       # ⭐ HA Integration（备选，和 Add-on 共用前端）
+│   ├── __init__.py                    #   integration 注册 + WS/REST API
+│   ├── config_flow.py                 #   HA 配置向导
+│   ├── const.py                       #   常量
+│   ├── manifest.json                  #   集成元信息（version / domain）
+│   ├── strings.json
+│   ├── translations/
+│   └── www/                           #   前端静态文件（和 Add-on/www/ 同步）
 │
-├── gen_qlovehome_data.py               # ⭐ 数据生成器（改实体 ID 跑这个）
-├── extract_rooms.py                   # 从标注图提取房间多边形
-├── calib_real.py                      # 现实风底板校准
-├── calib_real.json                    # 校准输出
-├── rooms_poly.json                    # 房间多边形坐标（唯一几何源头）
-├── photo_outline.json                 # 户型外轮廓
-├── missing_ents.json                  # 未接入设备清单（运行时读取）
-├── templates.yaml                     # HA template sensor 示例
-├── optional-patches/
-│   └── patch_midea5.py                # 美的 AC LAN 兼容补丁（可选）
+├── qlovehome/                        # 前端源码（开发用，同步到两个 www/）
 │
-├── QLovehome.png                      # 项目图标（根目录）
-├── hacs.json                          # HACS 自动发现配置
-├── info.md                            # HACS 安装后展示页
-├── LICENSE                            # MIT
-└── README.md                          # 本文件
+├── gen_qlovehome_data.py
+├── extract_rooms.py
+├── calib_real.py
+├── templates.yaml
+├── hacs.json
+├── info.md
+├── USER_GUIDE.md
+├── LICENSE
+└── README.md
 ```
 
 ---
@@ -251,6 +260,7 @@ copy qlovehome\. custom_components\qlovehome\www\ -Recurse
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| **v1.4.0** | 2026-10-28 | ⭐ **新增 HAOS Add-on 模式**（独立 Python 进程 + HA WebSocket 连接 + Ingress 侧边栏，自包含 `qlovehome_addon/` 目录）；🗂️ 设备操控统一走后端 `/api/qlh/service`（两种模式都带审计日志），失败才回落直接 `hass.callService()`；📝 新增 **最近动态** 面板（底部 tab 栏，自动记录设备操控、定时设置、定时到点执行，JSONL 存服务器，支持事件类型筛选）；🔌 子设备绑定（热水器绑水量传感器、灯绑子灯组等，编辑器里可添加，子设备自动从户型图剔除）；❄️ 空调面板新增 **扫风模式**（读 `swing_modes` 属性，有才显示按钮）；🏷️ 版本号改从 `manifest.json` 动态读取，关于页面实时跟随更新 |
 | **v1.3.4** | 2026-10-28 | 🏠 默认模板补上**过道 + 卫生间**（6 个房间铺满画布，每房一盏示例灯）；🐛 修复 HA 顶栏隐藏时报 `getElementById is not a function`（逐层扫描 shadow root 时对 Document 兼容取样式节点）；🩹 服务器配置只剩 `timers` 段时不再被误判为「已配置」，可正常回落到默认模板 |
 | **v1.3.3** | 2026-10-28 | 🏠 默认模板改为**4 个房间铺满画布 + 每房一盏灯**（移除原来开发者自带的户型）；🪟 修复隐藏 HA 顶栏按钮无效（兼容 Lovelace `.header` 与新版 `ha-top-app-bar`，逐层注入 shadow DOM） |
 | **v1.3.2** | 2026-10-28 | 👨‍👩‍👧 家人支持**一位家人挂多台设备**（手机 / 手表 / 平板）：编辑器里「+ 设备」逐个添加，任意一台在线即算在家；家人详情页会列出每台在线状态 |

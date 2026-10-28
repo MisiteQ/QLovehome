@@ -8,7 +8,12 @@
 - 接口有两套（内容完全一致，读写同一个文件）：
   * WebSocket: qlovehome/get_config / qlovehome/save_config
                qlovehome/get_ui     / qlovehome/save_ui
+               qlovehome/get_timers / qlovehome/set_timer / qlovehome/clear_timer
+               qlovehome/service_call   ← 设备操控（走后端记审计日志）
+               qlovehome/get_audit      ← 读取操作记录（最近动态）
   * REST     : GET/POST /api/qlh/config, GET/POST /api/qlh/ui
+               GET/POST/DELETE /api/qlh/timer
+               POST /api/qlh/service, GET /api/qlh/audit
   WebSocket 只在集成「已添加」时前端才拿得到 hass，所以 REST 作为兜底，
   保证仅仅是丢个文件夹进 custom_components 也能存住配置。
 """
@@ -16,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 import voluptuous as vol
@@ -29,6 +35,11 @@ from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    AUDIT_FILE,
+    AUDIT_MAX_BYTES,
+    AUDIT_MAX_ENTRIES,
+    API_AUDIT_URL,
+    API_SERVICE_URL,
     API_TIMER_URL,
     API_UI_URL,
     API_URL,
@@ -54,6 +65,8 @@ WS_SAVE_UI = "qlovehome/save_ui"
 WS_GET_TIMERS = "qlovehome/get_timers"
 WS_SET_TIMER = "qlovehome/set_timer"
 WS_CLEAR_TIMER = "qlovehome/clear_timer"
+WS_SERVICE_CALL = "qlovehome/service_call"   # 设备操控（走后端记审计）
+WS_GET_AUDIT = "qlovehome/get_audit"         # 读取操作记录
 
 
 # ── 存储路径 ────────────────────────────────────────────────
@@ -76,6 +89,87 @@ def _legacy_path(hass: HomeAssistant) -> Path:
 
 def _ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _read_version() -> str:
+    """从 manifest.json 读版本号（关于页显示用，和前端保持实时同步）."""
+    try:
+        mf = Path(__file__).parent / "manifest.json"
+        if mf.exists():
+            data = json.loads(mf.read_text(encoding="utf-8"))
+            v = data.get("version", "0.0.0")
+            return str(v)
+    except (OSError, ValueError):
+        pass
+    return "0.0.0"
+
+
+# ── 审计日志（操作记录 / 最近动态）────────────────────────
+# 存 JSONL（每行一条 JSON），和配置同目录
+def _audit_path() -> Path:
+    return _data_path().parent / AUDIT_FILE
+
+
+def _audit_rotate() -> None:
+    """超过 AUDIT_MAX_BYTES → 把 .log 重命名为 .log.1，继续写新文件."""
+    p = _audit_path()
+    if not p.exists():
+        return
+    try:
+        if p.stat().st_size >= AUDIT_MAX_BYTES:
+            rotated = p.with_suffix(p.suffix + ".1")
+            if rotated.exists():
+                rotated.unlink()
+            p.rename(rotated)
+            _LOGGER.debug("QLovehome 审计日志已轮转: %s", rotated)
+    except OSError:
+        _LOGGER.exception("审计日志轮转失败")
+
+
+def _audit_write(event: str, **detail) -> None:
+    """写一条审计记录（线程安全：每次独立打开文件追加）."""
+    _audit_rotate()
+    entry = {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+    }
+    if detail:
+        entry.update(detail)
+    try:
+        p = _audit_path()
+        _ensure_parent(p)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        _LOGGER.exception("写入审计日志失败")
+
+
+def _audit_read_recent(limit: int, event: str | None = None) -> list[dict]:
+    """逆序读取审计日志，返回最近 N 条（可选按 event 过滤）."""
+    limit = min(max(limit, 1), AUDIT_MAX_ENTRIES)
+    result: list[dict] = []
+    for log_file in (_audit_path(), _audit_path().with_suffix(AUDIT_FILE + ".1")):
+        if not log_file.exists():
+            continue
+        try:
+            lines = log_file.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        # 从后往前扫，直到凑够 limit
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if event and entry.get("event") != event:
+                continue
+            result.append(entry)
+            if len(result) >= limit:
+                return result
+    return result
 
 
 def _read(hass: HomeAssistant) -> dict:
@@ -246,6 +340,8 @@ def _async_register_ws(hass: HomeAssistant) -> None:
         ws_get_timers,
         ws_set_timer,
         ws_clear_timer,
+        ws_service_call,
+        ws_get_audit,
     ):
         websocket_api.async_register_command(hass, cmd)
     store["ws"] = True
@@ -256,7 +352,8 @@ def _async_register_api(hass: HomeAssistant) -> None:
     store = hass.data.setdefault(DOMAIN, {})
     if store.get("api"):
         return
-    views = [QlhConfigView(hass), QlhUiView(hass), QlhTimerView(hass)]
+    views = [QlhConfigView(hass), QlhUiView(hass), QlhTimerView(hass),
+             QlhAuditView(hass), QlhServiceView(hass)]
     for view in views:
         hass.http.register_view(view)
     store["api"] = True
@@ -359,6 +456,7 @@ async def _async_fire_timer(hass: HomeAssistant, entity_id: str, item: dict) -> 
         (act == "off" and state.state in ("off", "closed"))
         or (act == "on" and state.state in ("on", "open"))
     ))
+    fired = False
     if not already:
         domain, service = entity_id.split(".", 1)[0], "turn_on" if act == "on" else "turn_off"
         if not hass.services.has_service(domain, service):
@@ -368,6 +466,7 @@ async def _async_fire_timer(hass: HomeAssistant, entity_id: str, item: dict) -> 
                 domain, service, {"entity_id": entity_id}, blocking=False
             )
             _LOGGER.info("QLovehome 定时执行: %s · %s", name, "开启" if act == "on" else "关闭")
+            fired = True
         except Exception:  # noqa: BLE001 - 单条失败不影响调度
             _LOGGER.exception("QLovehome 定时执行失败: %s", entity_id)
 
@@ -383,6 +482,12 @@ async def _async_fire_timer(hass: HomeAssistant, entity_id: str, item: dict) -> 
 
     hass.bus.async_fire(
         TIMER_EVENT, {"entity_id": entity_id, "act": act, "name": name}
+    )
+
+    # 审计：定时到点自动触发
+    await hass.async_add_executor_job(
+        _audit_write, "timer_fired",
+        entity_id=entity_id, act=act, name=name, fired=fired,
     )
 
 
@@ -425,9 +530,10 @@ async def _async_restore_timers(hass: HomeAssistant) -> None:
 @websocket_api.websocket_command({vol.Required("type"): WS_GET_CONFIG})
 @websocket_api.async_response
 async def ws_get_config(hass, connection, msg):
-    """前端拉取完整配置."""
+    """前端拉取完整配置（附带集成版本号）."""
     data = await hass.async_add_executor_job(_read, hass)
-    connection.send_result(msg["id"], {"config": data})
+    version = await hass.async_add_executor_job(_read_version)
+    connection.send_result(msg["id"], {"config": data, "version": version})
 
 
 @websocket_api.websocket_command(
@@ -494,6 +600,12 @@ async def ws_set_timer(hass, connection, msg):
     timers = await hass.async_add_executor_job(_save)
     _schedule_timer(hass, entity_id, item)
     hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, **item})
+    # 审计日志
+    await hass.async_add_executor_job(
+        _audit_write, "timer_set",
+        entity_id=entity_id, act=item["act"], name=item["n"],
+        mins=round((item["end"] - int(datetime.now(timezone.utc).timestamp() * 1000)) / 60000),
+    )
     connection.send_result(msg["id"], {"timers": timers})
 
 
@@ -513,10 +625,67 @@ async def ws_clear_timer(hass, connection, msg):
     timers = await hass.async_add_executor_job(_drop)
     _cancel_timer(hass, entity_id)
     hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, "act": None})
+    await hass.async_add_executor_job(
+        _audit_write, "timer_clear", entity_id=entity_id,
+    )
     connection.send_result(msg["id"], {"timers": timers})
 
 
-# ── REST 兜底（前端拿不到 hass 对象时用）────────────────────
+@websocket_api.websocket_command({vol.Required("type"): WS_SERVICE_CALL})
+@websocket_api.async_response
+async def ws_service_call(hass, connection, msg):
+    """设备操控（走后端，自动记审计日志）.
+
+    参数:
+      domain:      服务域（如 climate / light / cover）
+      service:     服务名（如 set_temperature / turn_on / turn_off）
+      service_data: 传给服务的 dict（必含 entity_id）
+      label:       可选，人类可读的操作描述（写进审计里）
+    """
+    domain = msg.get("domain", "")
+    service = msg.get("service", "")
+    service_data = msg.get("service_data") or {}
+    if not isinstance(service_data, dict):
+        connection.send_result(msg["id"], {"ok": False, "error": "service_data must be object"})
+        return
+    entity_id = service_data.get("entity_id", "")
+
+    try:
+        await hass.services.async_call(
+            domain, service, service_data, blocking=False
+        )
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("QLovehome 服务调用失败 %s.%s: %s", domain, service, exc)
+        connection.send_result(msg["id"], {"ok": False, "error": str(exc)})
+        return
+
+    # 记审计日志
+    try:
+        await hass.async_add_executor_job(
+            _audit_write, "service_call",
+            entity_id=entity_id, domain=domain, service=service,
+            label=msg.get("label") or "",
+            data={k: v for k, v in service_data.items() if k != "entity_id"},
+        )
+    except Exception:  # noqa: BLE001 - 审计写失败不影响主流程
+        _LOGGER.exception("写审计日志失败")
+
+    connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.websocket_command({vol.Required("type"): WS_GET_AUDIT})
+@websocket_api.async_response
+async def ws_get_audit(hass, connection, msg):
+    """读取最近操作记录（审计日志）.
+
+    参数:
+      limit:  最多返回几条（默认 50，最大 AUDIT_MAX_ENTRIES）
+      event:  可选，只返回某类事件（如 "service_call" 只看设备操控）
+    """
+    limit = int(msg.get("limit") or 50)
+    event = msg.get("event") or None
+    entries = await hass.async_add_executor_job(_audit_read_recent, limit, event)
+    connection.send_result(msg["id"], {"entries": entries})
 class _QlhBaseView(HomeAssistantView):
     """读写集成目录里的配置文件."""
 
@@ -540,7 +709,8 @@ class QlhConfigView(_QlhBaseView):
 
     async def get(self, request):
         data = await self.hass.async_add_executor_job(_read, self.hass)
-        return self.json({"config": data})
+        version = await self.hass.async_add_executor_job(_read_version)
+        return self.json({"config": data, "version": version})
 
     async def post(self, request):
         body = await self._body(request)
@@ -603,6 +773,11 @@ class QlhTimerView(_QlhBaseView):
         timers = await self.hass.async_add_executor_job(_save)
         _schedule_timer(self.hass, entity_id, item)
         self.hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, **item})
+        await self.hass.async_add_executor_job(
+            _audit_write, "timer_set",
+            entity_id=entity_id, act=item["act"], name=item["n"],
+            mins=round((item["end"] - int(datetime.now(timezone.utc).timestamp() * 1000)) / 60000),
+        )
         return self.json({"ok": True, "timers": timers})
 
     async def delete(self, request):
@@ -618,4 +793,61 @@ class QlhTimerView(_QlhBaseView):
         timers = await self.hass.async_add_executor_job(_drop)
         _cancel_timer(self.hass, entity_id)
         self.hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, "act": None})
+        await self.hass.async_add_executor_job(
+            _audit_write, "timer_clear", entity_id=entity_id,
+        )
         return self.json({"ok": True, "timers": timers})
+
+
+class QlhAuditView(_QlhBaseView):
+    """读取操作记录（审计日志）."""
+
+    url = API_AUDIT_URL
+    name = "api:qlh:audit"
+    cors_allowed = True
+
+    async def get(self, request):
+        try:
+            limit = int(request.query.get("limit") or 50)
+        except ValueError:
+            limit = 50
+        event = request.query.get("event") or None
+        entries = await self.hass.async_add_executor_job(_audit_read_recent, limit, event)
+        return self.json({"entries": entries})
+
+
+class QlhServiceView(_QlhBaseView):
+    """设备操控 REST 兜底（前端拿不到 hass 对象时用）."""
+
+    url = API_SERVICE_URL
+    name = "api:qlh:service"
+    cors_allowed = True
+
+    async def post(self, request):
+        body = await self._body(request)
+        domain = body.get("domain", "")
+        service = body.get("service", "")
+        service_data = body.get("service_data") or {}
+        if not isinstance(service_data, dict):
+            return self.json({"error": "service_data must be object"}, status_code=400)
+        entity_id = service_data.get("entity_id", "")
+
+        try:
+            await self.hass.services.async_call(
+                domain, service, service_data, blocking=False
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("QLovehome REST 服务调用失败 %s.%s: %s", domain, service, exc)
+            return self.json({"ok": False, "error": str(exc)})
+
+        try:
+            await self.hass.async_add_executor_job(
+                _audit_write, "service_call",
+                entity_id=entity_id, domain=domain, service=service,
+                label=body.get("label") or "",
+                data={k: v for k, v in service_data.items() if k != "entity_id"},
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("REST 审计写失败")
+
+        return self.json({"ok": True})

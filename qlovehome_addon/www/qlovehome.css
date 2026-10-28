@@ -1,0 +1,2508 @@
+/* LoveHome · 全屋大屏 —— 视觉基线：深色暮光 + 暖金标记 */
+:root {
+  --ink: #0b0e14;
+  --ink-2: #121722;
+  --panel: rgba(20, 25, 35, 0.72);
+  --panel-2: rgba(28, 34, 46, 0.86);
+  --line: rgba(var(--ln), 0.14);
+  --line-soft: rgba(var(--ln), 0.08);
+  --text: #eceff4;
+  --dim: rgba(var(--fg), 0.64);
+  --dim-2: rgba(var(--fg), 0.55);
+  --amber: #e7bd79;
+  --amber-2: #f3dcb0;
+  --amber-soft: rgba(var(--am), 0.15);
+  --teal: #7fd0bd;
+  --bad: #e8907c;
+  /* 「日落/深色」档的图标色：比正文略暗的冷白，和琥珀的「日出」档拉开，
+     也不用蓝色（会跟"冬 · 霜蓝"那个圆点撞） */
+  --moon: 214, 222, 236;
+  --radius: 16px;
+  --font: "MiSans", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  /* 字号总缩放：设置里的「字体大小」滑块改这一个数（0.85~1.25，默认 1）。
+     所有字号都写成 calc(Npx * var(--fsk))，行高用的都是无单位倍数，所以会一起跟着变；
+     图标是 width/height 的 px，不跟着变——刻意如此，字放大但图标不跟着膨胀才不会挤爆栅格。 */
+  --fsk: 1;
+  /* 通道色：只写 RGB，透明度由各处自己带，方便深浅主题整体换色 */
+  --fg: 236, 239, 244;
+  --hl: 255, 255, 255;
+  --am: 231, 189, 121;
+  --wall: 196, 208, 224;
+  --ln: 232, 226, 214;
+  --panel-soft: rgba(18, 21, 28, 0.42);
+  /* 左栏 / 右侧房间面板的雾面玻璃底色：--pane-rgb 是基色，--pane-a 是透明度（JS 会按主题和用户设置改写）
+     两者分开写、且直接用在 background 里，避免把 var() 套进另一个自定义属性（那样会在 :root 就被解析死） */
+  --pane-rgb: 20, 25, 35;
+  --pane-a: 0.26;
+  /* 弹窗底色：不再用近纯黑（贴在深色页面上像一块黑板），改成与页面同族的蓝黑，
+     再叠一层季节色（见 .layer）——这样弹窗和当前主题是一个色调 */
+  --sheet: rgba(13, 17, 24, 0.94);
+  /* 季节氛围通道：--s1/2/3 是三层氛围光的色相，--bg1/2/3 与 --gl1/2/3 是它们的浓度
+     （深浅主题各自给浓度，季节只换色相，这样配色不会互相打架） */
+  --s1: 231, 189, 121;
+  --s2: 96, 146, 186;
+  --s3: 72, 122, 128;
+  --bg1: 0.08; --bg2: 0.11; --bg3: 0.08;
+  --gl1: 0.16; --gl2: 0.14; --gl3: 0.09;
+  --bg0a: #0a0d13; --bg0b: #121825; --bg0c: #0c1017;
+}
+
+/* 浅色主题：跟随 sun.sun 日出日落自动切换，也可以手动固定 */
+.screen[data-theme=light] {
+  --ink: #efece6;
+  --ink-2: #e6e2da;
+  --panel: rgba(255, 255, 255, 0.74);
+  --panel-2: rgba(255, 255, 255, 0.92);
+  --line: rgba(40, 44, 52, 0.15);
+  --line-soft: rgba(40, 44, 52, 0.09);
+  --text: #23262c;
+  --dim: rgba(35, 38, 44, 0.72);
+  --dim-2: rgba(35, 38, 44, 0.66);
+  --amber: #a9762a;
+  --amber-2: #7d5317;
+  --amber-soft: rgba(169, 118, 42, 0.13);
+  --teal: #2f8a76;
+  --bad: #a33a20;
+  --moon: 52, 62, 82;
+  --fg: 32, 35, 41;
+  --hl: 28, 31, 36;
+  --am: 169, 118, 42;
+  --wall: 104, 114, 128;
+  --ln: 58, 62, 70;
+  --panel-soft: rgba(255, 255, 255, 0.66);
+  --pane-rgb: 255, 255, 255;
+  --sheet: rgba(247, 244, 238, 0.96);
+  /* 浅色底更亮，氛围光要压淡一点，否则整屏发灰 */
+  --bg1: 0.12; --bg2: 0.13; --bg3: 0.09;
+  --gl1: 0.18; --gl2: 0.16; --gl3: 0.11;
+  --bg0a: #f7f4ee; --bg0b: #ece9e1; --bg0c: #f4f1ea;
+  background:
+    repeating-linear-gradient(45deg, rgba(58, 62, 70, 0.035) 0 1px, transparent 1px 11px),
+    radial-gradient(1100px 720px at 10% 92%, rgba(var(--s1), var(--bg1)), transparent 62%),
+    radial-gradient(900px 640px at 92% 4%, rgba(var(--s2), var(--bg2)), transparent 60%),
+    radial-gradient(700px 520px at 78% 96%, rgba(var(--s3), var(--bg3)), transparent 65%),
+    linear-gradient(158deg, var(--bg0a) 0%, var(--bg0b) 55%, var(--bg0c) 100%);
+}
+.screen[data-theme=light] .ambient { background-image: url('./assets/bg-day.jpg'); opacity: .5; }
+/* 浅色：亮态是深琥珀底 + 近白图标；描边加粗到 2px，14px 的小图标才看得清 */
+.screen[data-theme=light] .marker .ico { stroke: #fffdf7; stroke-width: 2; }
+.screen[data-theme=light] .plan-hatch { opacity: .8; }
+
+/* 浅色下底色接近白，同一条透明度会显得糊；这里统一提一档对比度 */
+.screen[data-theme=light] .room-label { fill: rgba(var(--fg), 0.9); }
+.screen[data-theme=light] .room-temp { fill: #6b4613; }
+.screen[data-theme=light] .side-room,
+.screen[data-theme=light] .side-room span { color: rgba(var(--fg), 0.9); }
+.screen[data-theme=light] .side-room b { color: var(--amber-2); }
+/* 6px 的状态点：浅色底上 0.34 的墨色只剩 2.2:1，看着像没渲染出来 →
+   压到 0.55（≈3.9:1，过非文本 3:1）并加一圈内描边，边缘清楚一点 */
+.screen[data-theme=light] .side-room em {
+  background: rgba(var(--fg), 0.55);
+  box-shadow: inset 0 0 0 1px rgba(var(--fg), 0.18);
+}
+/* 亮灯的琥珀点：白底上发光看不出来，改成实心金 + 一圈琥珀描边（金比深褐更像"亮着"，
+   对米白底 3.4:1，仍过非文本 3:1） */
+.screen[data-theme=light] .side-room em.warm {
+  background: var(--amber);
+  box-shadow: 0 0 0 2px rgba(var(--am), 0.3), 0 0 6px rgba(var(--am), 0.35);
+}
+.screen[data-theme=light] .side-room.active { color: var(--text); }
+.screen[data-theme=light] .side-stat span { color: rgba(var(--fg), 0.86); }
+.screen[data-theme=light] .side-stat b { color: rgba(var(--fg), 0.96); }
+/* 左栏底色变透后背景更亮，10px 的「/1 /25」这种计数要压深一点才够 4.5（实测 0.72→3.63） */
+.screen[data-theme=light] .side-stat em { color: rgba(var(--fg), 0.9); }
+.screen[data-theme=light] .side-cap { color: rgba(var(--fg), 0.86); }
+.screen[data-theme=light] .close { color: rgba(var(--fg), 0.94); }
+.screen[data-theme=light] .side-in { color: var(--amber-2); }
+.screen[data-theme=light] .side-stat b.on { color: var(--amber-2); }
+.screen[data-theme=light] .dateline .lunar { color: var(--amber-2); }
+.screen[data-theme=light] .tag-demo { color: var(--amber-2); border-color: rgba(var(--am), 0.4); }
+.screen[data-theme=light] .side-in em { color: rgba(var(--fg), 0.72); }
+.screen[data-theme=light] .pill { color: rgba(var(--fg), 0.94); }
+.screen[data-theme=light] .filter { color: rgba(var(--fg), 0.9); }
+.screen[data-theme=light] .filter.active { color: var(--amber-2); }
+.screen[data-theme=light] .dateline { color: rgba(var(--fg), 0.86); }
+.screen[data-theme=light] .w-kwh { color: rgba(var(--fg), 0.82); }
+.screen[data-theme=light] .w-desc,
+.screen[data-theme=light] .w-range { color: rgba(var(--fg), 0.86); }
+.screen[data-theme=light] .rp-group { color: rgba(var(--fg), 0.7); }
+.screen[data-theme=light] .rp-item .rn i { color: rgba(var(--fg), 0.7); }
+.screen[data-theme=light] .rp-item.ro .rn { color: rgba(var(--fg), 0.88); }
+.screen[data-theme=light] .rp-item.ro .rv { color: var(--amber-2); }
+.screen[data-theme=light] .cal-cell i { color: rgba(var(--fg), 0.74); }
+.screen[data-theme=light] .cal-cell.empty { visibility: hidden; }
+/* 小时/多日预报都是 10~12px 小字，又压在半透明面板上：浅色下 0.74 不够，提到 0.9 */
+.screen[data-theme=light] .we-day em,
+.screen[data-theme=light] .we-hour em,
+.screen[data-theme=light] .we-hour span { color: rgba(var(--fg), 0.9); }
+.screen[data-theme=light] .we-day i { color: rgba(var(--fg), 0.9); }
+.screen[data-theme=light] .pwr-i em,
+.screen[data-theme=light] .we-now b i { color: rgba(var(--fg), 0.86); }
+.screen[data-theme=light] .card-sub,
+.screen[data-theme=light] .ctl-note,
+.screen[data-theme=light] .we-note,
+.screen[data-theme=light] .cal-note { color: rgba(var(--fg), 0.72); }
+.screen[data-theme=light] .footer-note { color: var(--amber-2); }
+.screen[data-theme=light] .footer-note span:first-child { color: var(--amber-2); }
+.screen[data-theme=light] .app-line span { color: rgba(var(--fg), 0.86); }
+.screen[data-theme=light] .layer-head span { color: rgba(var(--fg), 0.74); }
+/* 屏保三行的颜色统一写在 .standby 里（底永远是深色），浅色主题不要再覆盖 */
+.screen[data-theme=light] .card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.62));
+  border-color: rgba(40, 44, 52, 0.13);
+}
+.screen[data-theme=light] .cam-slot,
+.screen[data-theme=light] .app-lines { background: rgba(255, 255, 255, 0.6); border-color: rgba(40, 44, 52, 0.12); }
+.screen[data-theme=light] .we-sec { color: rgba(var(--fg), 0.84); }
+.screen[data-theme=light] .cal-wd { color: rgba(var(--fg), 0.7); }
+.screen[data-theme=light] .cal-yj { color: rgba(var(--fg), 0.86); }
+.screen[data-theme=light] .cal-yj em:last-of-type { color: #a32d2d; }
+
+/* ── 四季主题色：春 / 夏 / 秋 / 冬 ──
+   只换「氛围光三层 + 底色冷暖 + 房间色块 / 外框」的色相；
+   --am（暖金）是灯光本身的语义，保持不变，所以既有文字对比度基线不受影响。
+   深浅各给一套底色：深色偏该季的暗调，浅色只染一点点，保持纸感。 */
+.screen[data-season=spring] {
+  --s1: 138, 198, 130;   /* 嫩草绿 */
+  --s2: 236, 168, 194;   /* 樱粉 */
+  --s3: 176, 208, 130;   /* 柳黄 */
+  --bg0a: #0a1210; --bg0b: #101d17; --bg0c: #0a1310;
+}
+.screen[data-season=summer] {
+  --s1: 88, 178, 198;    /* 湖青 */
+  --s2: 104, 156, 216;   /* 天蓝 */
+  --s3: 84, 202, 178;    /* 薄荷 */
+  --bg0a: #08121a; --bg0b: #0e1d28; --bg0c: #07121a;
+}
+.screen[data-season=autumn] {
+  --s1: 228, 152, 78;    /* 柿橙 */
+  --s2: 200, 128, 82;    /* 赭石 */
+  --s3: 160, 118, 76;    /* 栗棕 */
+  --bg0a: #120d09; --bg0b: #1c1510; --bg0c: #120c08;
+}
+.screen[data-season=winter] {
+  --s1: 148, 178, 212;   /* 冷蓝 */
+  --s2: 168, 186, 220;   /* 霜蓝 */
+  --s3: 200, 210, 230;   /* 雪白 */
+  --bg0a: #0a0e16; --bg0b: #101827; --bg0c: #0b101a;
+}
+.screen[data-theme=light][data-season=spring] { --bg0a: #f5f8f1; --bg0b: #eaf0e6; --bg0c: #f6f9f3; }
+.screen[data-theme=light][data-season=summer] { --bg0a: #eff6f9; --bg0b: #e3edf3; --bg0c: #f1f7fa; }
+.screen[data-theme=light][data-season=autumn] { --bg0a: #f9f5ee; --bg0b: #efe8dc; --bg0c: #faf6ef; }
+.screen[data-theme=light][data-season=winter] { --bg0a: #f3f6fb; --bg0b: #e8eef6; --bg0c: #f5f8fc; }
+/* 季节也让氛围图染一点色相，不然冬天还是暖黄的底图 */
+.screen[data-season=spring] .ambient { filter: hue-rotate(-38deg) saturate(.9); }
+.screen[data-season=summer] .ambient { filter: hue-rotate(-92deg) saturate(.85); }
+.screen[data-season=autumn] .ambient { filter: saturate(1.06); }
+.screen[data-season=winter] .ambient { filter: hue-rotate(-150deg) saturate(.5) brightness(1.05); }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--ink);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+.screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 480px;
+  overflow: hidden;
+  color: var(--text);
+  background:
+    repeating-linear-gradient(45deg, rgba(var(--fg), 0.022) 0 1px, transparent 1px 11px),
+    radial-gradient(1100px 720px at 10% 92%, rgba(var(--s1), var(--bg1)), transparent 62%),
+    radial-gradient(900px 640px at 92% 4%, rgba(var(--s2), var(--bg2)), transparent 60%),
+    radial-gradient(700px 520px at 78% 96%, rgba(var(--s3), var(--bg3)), transparent 65%),
+    linear-gradient(158deg, var(--bg0a) 0%, var(--bg0b) 55%, var(--bg0c) 100%);
+}
+.ambient { position: absolute; inset: 0; background: url('./assets/bg-night.jpg') center / cover no-repeat; opacity: .26; pointer-events: none; }
+.aurora { position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.5; pointer-events: none; }
+.a1 { width: 46%; height: 42%; left: -8%; bottom: -12%; background: radial-gradient(closest-side, rgba(var(--s1), var(--gl1)), transparent); }
+.a2 { width: 40%; height: 40%; right: -6%; top: -10%; background: radial-gradient(closest-side, rgba(var(--s2), var(--gl2)), transparent); }
+.a3 { width: 30%; height: 26%; right: 8%; bottom: 2%; background: radial-gradient(closest-side, rgba(var(--s3), var(--gl3)), transparent); }
+
+/* ── 顶栏 ── */
+.topbar {
+  position: absolute; inset: 0 0 auto 0;
+  /* 右侧留白要容得下右上角两排按钮里更宽的一排（四季 6×24 + 5×6 = 174），
+     再留 14px 呼吸位 → 24 + 174 + 14 ≈ 212。天气/用电卡整体左移就靠这里。
+     （布局那排去掉齿轮后只剩 5 个 = 144，比四季排窄，不影响这条留白） */
+  /* 206 = 24(right) + 174(四季那排) + 8(呼吸位)：天气块右边界 978 与按钮组左边界 986 之间留 8px */
+  padding: 22px 206px 0 30px;
+  display: grid;
+  /* v218：中间列仍是 1fr，但「左移 + 家人 chip 紧跟 pill」改由列内的 .top-mid
+     （flex 一层）实现。不拆 auto 列：实测 auto 列会被压到 min-content（222px），
+     pill 和 chip 全部换行 */
+  grid-template-columns: minmax(190px, auto) 1fr minmax(150px, auto);
+  align-items: start; gap: 18px;
+  z-index: 5;
+  transition: opacity .3s ease, transform .3s ease;
+}
+
+/* 顶栏中间层（v218，v220 居中）：情景组 + 家人 chip 横排一排。
+   v220 用户要求「把这几个对齐居中」→ 整组在中间列里水平居中（不是整屏居中：
+   整屏居中会被右边的天气块压住，中列左右边界就是时钟右缘和天气左缘）。
+   窄屏放不下时整组换行，居中依然成立。 */
+.top-mid { display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 9px; min-width: 0; }
+
+/* ── 布局开关：全屏 / 左栏 / 顶栏 / HA 侧栏 / HA 顶栏 ──
+   5 个按钮（5×24 + 4×6 = 144）：齿轮（外观设置）已挪到左下角 LoveHome 那一条。
+   比下面一排四季色短 30px，两排右边界对齐；
+   .hide-top 里 season-toggles 的 right 按这排的 144 算（= 24 + 144 + 6） */
+.layout-toggles {
+  position: absolute; top: 20px; right: 24px; z-index: 30;
+  display: flex; gap: 6px;
+}
+.lt-btn {
+  width: 24px; height: 24px; padding: 0; display: grid; place-items: center;
+  border-radius: 8px; cursor: pointer;
+  background: var(--panel-soft); border: 1px solid var(--line-soft);
+  color: var(--dim); backdrop-filter: blur(10px);
+  transition: color .18s, border-color .18s, background .18s;
+}
+.lt-btn svg { width: 14px; height: 14px; }
+/* 窄屏补位的齿轮同样用 i-cog，13px 下齿会糊，给到 14 */
+.lt-btn.only-narrow svg { width: 14px; height: 14px; }
+/* 只在窄屏出现的那个齿轮（宽屏时外观设置在左下角那条里） */
+.lt-btn.only-narrow { display: none; }
+.lt-btn:hover { color: var(--text); border-color: rgba(var(--fg), 0.26); }
+.lt-btn.off { color: rgba(var(--fg), 0.32); }
+.lt-btn.off:hover { color: var(--amber); border-color: rgba(var(--am), 0.4); }
+/* 全屏进行中：点亮成琥珀色，一眼能看出当前是全屏态 */
+.lt-btn.on { color: var(--amber-2); border-color: rgba(var(--am), 0.45); background: var(--amber-soft); }
+.lt-btn.on:hover { color: var(--amber-2); border-color: rgba(var(--am), 0.6); }
+
+/* ── 主题色（四季）快捷按钮：接在布局按钮下面一排 ──
+   5×24 + 4×6 = 144，末尾挂昼夜按钮 → 6×24 + 5×6 = 174，
+   v235 再挂「现实风底板」按钮 → 7×24 + 6×6 = 204
+   右边界与上一排一致。注意：这一排只有 ≤900 才在右上角出现（宽屏是右下胶囊），
+   而 ≤900 天气块整块隐藏，所以加宽后不会压到天气 —— .topbar 的 206 右留白不用动 */
+.season-toggles {
+  /* right 与上一排一致，两排右边界对齐 */
+  position: absolute; top: 56px; right: 24px; z-index: 30;
+  display: flex; gap: 6px;
+  transition: opacity .3s ease, transform .3s ease;
+}
+.st-btn {
+  width: 24px; height: 24px; padding: 0; display: grid; place-items: center;
+  border-radius: 8px; cursor: pointer;
+  background: var(--panel-soft); border: 1px solid var(--line-soft);
+  backdrop-filter: blur(10px);
+  transition: border-color .18s, background .18s, transform .18s;
+}
+.st-btn i {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: rgb(var(--s1));
+  box-shadow: 0 0 0 1px rgba(var(--fg), 0.18);
+  transition: box-shadow .18s, transform .18s;
+}
+/* 自动：四个季节色拼成一个环，暗示「跟着节气走」 */
+.st-btn[data-season=auto] i {
+  background: conic-gradient(from 140deg, #8ac682, #58b2c6, #e4984e, #94b2d4, #8ac682);
+}
+.st-btn[data-season=spring] i { background: #8ac682; }
+.st-btn[data-season=summer] i { background: #58b2c6; }
+.st-btn[data-season=autumn] i { background: #e4984e; }
+.st-btn[data-season=winter] i { background: #94b2d4; }
+.st-btn:hover { border-color: rgba(var(--fg), 0.28); background: rgba(var(--fg), 0.08); }
+.st-btn:hover i { transform: scale(1.12); }
+.st-btn.on { border-color: rgba(var(--fg), 0.42); background: rgba(var(--fg), 0.13); }
+.st-btn.on i { box-shadow: 0 0 0 2px rgba(var(--fg), 0.22); }
+
+/* ── 昼夜主题按钮：一排三态轮换（日出→日落→自动），排在四季按钮末尾 ──
+   尺寸与 st-btn 完全一致，只把圆点换成图标；三种状态各用自己的色，别再叠"选中高亮" */
+.sun-btn {
+  width: 24px; height: 24px; padding: 0; display: grid; place-items: center;
+  border-radius: 8px; cursor: pointer;
+  background: var(--panel-soft); border: 1px solid var(--line-soft);
+  backdrop-filter: blur(10px);
+  color: rgba(var(--fg), 0.72);
+  transition: color .18s, border-color .18s, background .18s;
+}
+/* 14px + 稍粗描边：日出/日落的"地平线 + 半轮太阳"在 13px 下容易糊成一团 */
+.sun-btn svg { width: 14px; height: 14px; stroke-width: 1.9; }
+.sun-btn:hover { border-color: rgba(var(--fg), 0.28); background: rgba(var(--fg), 0.08); }
+/* 自动档：半亮太阳 + 一圈描边，表示"跟着太阳自己走" */
+.sun-btn[data-mode=auto] { border-color: rgba(var(--fg), 0.34); background: rgba(var(--fg), 0.10); }
+/* 日出档＝固定浅色，日落档＝固定深色 */
+.sun-btn[data-mode=day] { color: var(--amber); }
+.sun-btn[data-mode=night] { color: rgb(var(--moon)); }
+.sun-btn[data-mode=day]:hover,
+.sun-btn[data-mode=night]:hover { background: rgba(var(--fg), 0.09); }
+
+/* ── 现实风格底板按钮（v235）：跟在昼夜按钮后面，同一套控件语言 ──
+   开着时点亮成琥珀（跟 .lt-btn.on 一个反馈），关掉恢复灰 */
+.skin-btn {
+  width: 24px; height: 24px; padding: 0; display: grid; place-items: center;
+  border-radius: 8px; cursor: pointer;
+  background: var(--panel-soft); border: 1px solid var(--line-soft);
+  backdrop-filter: blur(10px);
+  color: rgba(var(--fg), 0.72);
+  transition: color .18s, border-color .18s, background .18s;
+}
+.skin-btn svg { width: 14px; height: 14px; stroke-width: 1.9; }
+.skin-ico { width: 20px; height: 20px; object-fit: contain; border-radius: 4px; }
+.skin-btn:hover { border-color: rgba(var(--fg), 0.28); background: rgba(var(--fg), 0.08); }
+.skin-btn.on {
+  color: var(--amber-2); border-color: rgba(var(--am), 0.45); background: var(--amber-soft);
+}
+.skin-btn.on:hover { border-color: rgba(var(--am), 0.6); }
+
+.clock {
+  background: none; border: 0; padding: 0; text-align: left; color: inherit;
+  font-family: inherit; cursor: pointer;
+}
+/* 时间改成七段数码管（JS 画的 SVG，见 lovehome.js::segClockSvg）：
+   font-size 现在只当「高度尺」用，height:1em 让 SVG 撑满这一档——
+   顶栏总高和改之前一模一样，只是数字本身从字形高度变成了满高灯管。 */
+.clock time {
+  /* 上限 57：DSEG 的字形比普通字体宽得多，8 个字符（含两个冒号）在 57px 字高时
+     总宽约 254px，正好压在上限 260（日期行宽度）以内；再高就会撑宽顶栏挤掉情景按钮。 */
+  display: block; font-size: clamp(calc(37px * var(--fsk)), 4.8vw, calc(56px * var(--fsk))); font-weight: 300;
+  letter-spacing: 1px; line-height: 1; height: 1em;
+}
+.clock time svg { display: block; height: 100%; width: auto; }
+.dateline { display: flex; gap: 10px; margin-top: 8px; font-size: calc(12.5px * var(--fsk)); color: var(--dim); }
+.dateline .lunar { color: rgba(var(--am), 0.72); }
+/* 季节徽标：文字走常规 dim 色，只用小圆点带出季节色，避免浅色底上彩色小字看不清 */
+.stag {
+  display: inline-flex; align-items: center; gap: 5px; font-style: normal;
+  padding: 1px 8px; border-radius: 999px; font-size: calc(11px * var(--fsk));
+  border: 1px solid var(--line); color: var(--dim); background: rgba(var(--fg), 0.05);
+}
+/* 11px 小字压在渐变上，字芯容易被抗锯齿稀释，浅色底必须再提一档 */
+.screen[data-theme=light] .stag { color: rgba(var(--fg), 0.9); background: rgba(255, 255, 255, 0.66); }
+.stag::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: rgb(var(--s1)); box-shadow: 0 0 0 1px rgba(var(--fg), 0.14);
+}
+.clock:hover .dateline { color: var(--text); }
+
+/* v218：整组左移到中间列左缘（原来是居中，用户要求左移给后面的家人 chip 腾地方）。
+   gap 9→8：和 chip 组一起把总宽压进 1fr 中列（1440 下约 698px），保证 4 pill +
+   3 chip 一行放得下 —— 不压缩会 wrap 成两行（实测翻车：1fr 列被 top-mid 的
+   min-content 钉在 ~462px，fr 份额不吸收剩余空间，只能从内容宽度上省） */
+.scenes { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-start; padding-top: 6px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 9px 9px; border-radius: 999px;
+  background: rgba(var(--hl), 0.045);
+  border: 1px solid var(--line-soft);
+  color: rgba(var(--fg), 0.82);
+  font-family: inherit; font-size: calc(12.5px * var(--fsk)); cursor: pointer;
+  transition: background .18s, border-color .18s, color .18s;
+  backdrop-filter: blur(8px);
+}
+.pill svg { width: 15px; height: 15px; color: var(--amber); opacity: .85; }
+.pill:hover { background: rgba(var(--hl), 0.095); border-color: rgba(var(--am), 0.34); color: var(--text); }
+.pill:active { background: rgba(var(--am), 0.14); border-color: rgba(var(--am), 0.46); }
+
+/* ── 顶栏 · 家人在线 chip（v218，用户要求）────────────────────────
+   接在情景按钮后面，三人一排：人形图标 + 名字 + 状态点。
+   点：在家 = 绿（跟概览「家人」卡同一颗 #6ec48a），离家 = 灰；unavailable/unknown
+   时 JS 不加 .on、title 写「检测中」，点不亮 —— 分不清的事不乱说。
+   chip 比 pill 矮半号、内距更窄，一眼能看出「这不是操作按钮，是状态灯」。 */
+.people-bar { display: flex; align-items: center; gap: 4px; padding-top: 6px; flex-wrap: wrap; }
+.ppl-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  height: 30px; padding: 0 7px; border-radius: 999px; cursor: pointer;
+  background: rgba(var(--hl), 0.045);
+  border: 1px solid var(--line-soft);
+  color: rgba(var(--fg), 0.72);
+  font-family: inherit; font-size: calc(12.5px * var(--fsk));
+  transition: background .18s, border-color .18s, color .18s;
+  backdrop-filter: blur(8px);
+}
+.ppl-chip svg { width: 14px; height: 14px; color: var(--amber); opacity: .8; flex: none; }
+.ppl-chip .d { width: 7px; height: 7px; border-radius: 50%; background: rgba(var(--fg), .22); flex: none; }
+.ppl-chip:hover { background: rgba(var(--hl), 0.095); border-color: rgba(var(--am), 0.3); color: var(--text); }
+.ppl-chip.on { color: var(--text); border-color: rgba(var(--am), 0.3); }
+.ppl-chip.on .d { background: #6ec48a; box-shadow: 0 0 8px rgba(110, 196, 138, .55); }
+/* v222：手表电量 ≤20% 时把点成琥珀色。写在这条之后 —— 与 .on 同权重，靠顺序压过绿点，
+   这样「在家 + 快没电」显示的是「该充电了」而不是一切正常 */
+.ppl-chip.low .d { background: var(--amber); box-shadow: 0 0 8px rgba(var(--am), .6); }
+
+/* 天气块：电量行搬走后自己撑成一块（左对齐 + 拉宽），右边界贴着右上角按钮组。
+   数字走 DSEG 字形（lovehome.js::dsegNum），° 也一起画，只有单位和中文用普通字体。
+   ── v193 尺寸/对齐重排 ──
+   右上角那一簇现在是「两条横带」：
+     带 1（20~54）：天气数字行 ······ 布局按钮排（20~44，高 24）
+     带 2（58~76）：湿度/体感    ······ 今日用电（58~76，高 18）
+   所以天气块写死 height 56（34 + 4 + 18）、margin-top -2（.topbar 内距 22 → 顶线 20），
+   底边 76 与「电量行」完全同一条线；两行次级文字统一 12.5px / DSEG 14px。 */
+.weather {
+  text-align: left; cursor: pointer;
+  /* 宽度钉死 190，是为了让天气块左边缘**恒等于右栏左边缘**：
+       天气左 = iframeW - 206(.topbar 右留白) - 190 = iframeW - 396
+       右栏左 = iframeW - 12(.stage 右内距) - 384(--rpw) = iframeW - 396
+     改 .topbar 的 206 / .stage 的右内距 / --rpw 任何一项，这里都要跟着重算。
+     原来是 min-width:236（比右栏探出去 32px），v168 一度是 204（那时 --rpw=400、右内距 10）；
+     v170 为给户型让位是 182（右内距 4），v186 右内距回到 12 → 182+8=190。 */
+  width: 190px;
+  margin-top: -2px; height: calc(56px * var(--fsk));
+}
+/* 数字行 34 高：DSEG 的字形撑满整个字框（上下都没有留白），所以「34 高」就是墨迹高度 */
+.w-line { display: flex; align-items: center; justify-content: flex-start; gap: 10px; height: calc(34px * var(--fsk)); }
+/* 26 → 22：水滴原来比按钮图标大一倍还粗，跟右边那排 13px 的小图标不是一个语汇 */
+.w-icon { width: 22px; height: 22px; color: rgba(160, 200, 230, 0.9); flex: none; }
+.w-line b { display: inline-flex; align-items: center; font-weight: 300; }
+/* 38 → 34：让 34 + 4 + 18 = 56 正好等于右侧「24 + 14 + 18」的轨高 */
+.w-line b svg.dsg { height: calc(34px * var(--fsk)); width: auto; }
+.w-desc { font-size: calc(13.5px * var(--fsk)); color: var(--dim); }
+/* 次级行：18 高（= 电量行同高）、12.5px 文字、DSEG 14 —— 全站次级文字只用这一档 */
+.w-range {
+  display: flex; align-items: center; gap: 3px; height: calc(18px * var(--fsk));
+  /* 12.5px 比原来的 13.5 小一档，透明度 .62 → .68 补回可读性，同时跟电量行同一个值 */
+  font-size: calc(12.5px * var(--fsk)); color: rgba(var(--fg), 0.68); margin-top: calc(4px * var(--fsk));
+}
+.w-range svg.dsg { height: calc(14px * var(--fsk)); width: auto; }
+.w-range .u { font-style: normal; font-size: calc(12px * var(--fsk)); color: rgba(var(--fg), 0.68); }
+/* 天气空态里的「去配置」按钮：轻量、靠贴在第二行末尾，跟 text 同基线 */
+.w-range .w-goto {
+  display: inline-block; margin-left: 6px; padding: 0 6px;
+  font-size: calc(11.5px * var(--fsk)); line-height: 16px;
+  color: var(--amber-2); background: rgba(var(--am), 0.12); border-radius: 8px;
+  text-decoration: none; cursor: pointer; vertical-align: baseline;
+}
+.w-range .w-goto:hover { background: rgba(var(--am), 0.24); color: var(--amber-1); }
+
+/* 今日用电：从天气块里挪到右上角按钮排的正下方，右边界与按钮组（right:24）对齐。
+   它已经不在 .topbar 里，所以 .hide-top 要单独收一遍。
+   v193：top 56 → 58、高 18 —— 与天气块的「湿度 · 体感」行同一条横带（58~76），
+   字号 12 → 12.5、两个数字都用 DSEG 14，跟天气块那行完全同一套。 */
+.w-kwh {
+  /* top = 20（按钮排顶线）+ 38（数字行 34 + 4 间距）× 字号：
+     .weather 那两行是跟着 --fsk 缩放的，电量行靠这条式子一直贴在它第二行上 */
+  position: absolute; top: calc(20px + 38px * var(--fsk)); right: 24px; z-index: 26; height: calc(18px * var(--fsk));
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  /* 这一行压在氛围渐变上（不是纯色面板），--dim-2 的 .55 实测只有 4.2~4.5，
+     单独提亮度；浅色再提一档 */
+  font-size: calc(12.5px * var(--fsk)); color: rgba(var(--fg), 0.68); cursor: pointer;
+  transition: color .18s, opacity .3s ease, transform .3s ease;
+}
+.w-kwh .k-ico { width: 13px; height: 13px; color: rgba(var(--am), 0.75); }
+.w-kwh b { display: inline-flex; align-items: center; color: var(--text); font-weight: 500; }
+.w-kwh b svg.dsg { height: calc(14px * var(--fsk)); width: auto; }
+.w-kwh span { display: inline-flex; align-items: center; gap: 2px; }
+.w-kwh span svg.dsg { height: calc(14px * var(--fsk)); width: auto; color: rgba(var(--fg), 0.68); }
+.w-kwh:hover b { color: var(--amber); }
+.w-kwh:hover span { color: var(--dim); }
+.screen.hide-top .w-kwh { opacity: 0; transform: translateY(-8px); pointer-events: none; }
+
+.metrics { display: none; }
+.metrics .m { display: inline-flex; align-items: center; gap: 5px; }
+.metrics .m svg { width: 13px; height: 13px; color: rgba(var(--am), 0.7); }
+.metrics b { color: var(--text); font-weight: 500; }
+.tag-demo {
+  font-size: calc(10.5px * var(--fsk)); letter-spacing: .5px; padding: 3px 8px; border-radius: 999px;
+  color: rgba(var(--am), 0.85); border: 1px solid rgba(var(--am), 0.28);
+  background: rgba(var(--am), 0.08);
+}
+
+.room-info {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px 5px 9px; border-radius: 999px;
+  background: rgba(var(--hl), 0.05); border: 1px solid var(--line-soft);
+  color: rgba(var(--fg), 0.82); font-family: inherit; font-size: calc(11.5px * var(--fsk)); cursor: pointer;
+  margin-left: 2px;
+}
+.room-info svg { width: 12px; height: 12px; color: var(--amber); transform: rotate(180deg); }
+.room-info:hover { background: rgba(var(--hl), 0.09); color: var(--text); }
+
+/* ── 户型舞台 ── */
+.stage {
+  position: absolute; inset: 0;
+  /* 中间列的宽度直接决定户型能画多大。实测 1440×900 下：viewBox 604×678、
+     容器 524×664，缩放取 min(0.867, 0.979) = 0.867 → **宽度才是瓶颈**（高度只用到
+     588/664，上下还空 76px）。所以加宽户型只能从「左右让位」里抠：
+     右内距 10→4（左内距不能动，它同时是左栏 --sidew 的起算点，减了左栏会等宽吃掉）。
+     v186 用户反馈「右栏紧贴着右边」→ 右内距 4→12 还回去，户型中间列窄 8px（缩放约 −2%），
+     天气块宽度同步 182→190 保持与右栏左边缘对齐。 */
+  padding: 114px 12px 66px 10px;
+  display: grid;
+  /* --rpw = 房间面板宽度。第三列直接钉成这个固定值：
+     原来写 auto，面板一开一合列宽就在 0 ↔ 302/400 之间跳，中间列的户型跟着左右横移约 200px。
+     现在不管面板开没开，这一列都占着，户型位置恒定不回中。 */
+  /* 400→384：右栏 384 仍装得下「设备名 + 副标题 + 40px 开关」，把这 16px 让给中间的户型。
+     ⚠️ 改这个值，顶栏天气块的 190px 必须跟着重算（见 .weather 注释里的对齐公式）。 */
+  --rpw: 384px;
+  /* 左栏 172→164、列距 13→11：省下的 14px 全给中间列装户型（左栏最长的"3 处亮灯"仍放得下） */
+  /* 第一列宽 = 顶栏日期行的宽度（JS 量好后写进 --sidew，见 syncSideW）：
+     左栏两块卡和左下角那条小条，右边界都停在日期的右边界上 */
+  grid-template-columns: var(--sidew, 185px) minmax(0, 1fr) var(--rpw);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 11px;
+  align-items: stretch;
+  /* 列宽只在折叠左栏时变，过渡留着让折叠有动画；面板开合不再改列宽，所以不会带住户型 */
+  transition: padding-top .32s ease, grid-template-columns .32s ease;
+}
+/* 负 margin：再向两侧列距里各借 6px。列距还有 11，借完仍留 5px，
+   不会贴到左栏 / 右列面板的边上；户型本身位置不受影响（列宽没变） */
+.plan-wrap { position: relative; width: calc(100% + 12px); height: 100%; min-width: 0; min-height: 0; margin: 0 -6px; }
+
+/* ── 左栏：全屋摘要 + 房间列表 ── */
+/* --srail = 左栏「右侧对齐」的唯一参考线：卡片内容区右边缘再往里收 --srail。
+   「房间 · 3 处亮灯」「4 /25」「客餐厅 29.6°」三类右对齐内容都必须落在这条线上，
+   所以三处的右内距/右外边距都得写 var(--srail)，不要再各自写死数字 */
+.side { display: flex; flex-direction: column; gap: 12px; min-height: 0; --srail: 8px; }
+.side-block {
+  /* 透明度取自 --pane-a（说明页可调，默认 74% 透明） */
+  background: rgba(var(--pane-rgb), var(--pane-a));
+  border: 1px solid var(--line-soft);
+  border-radius: 14px; padding: 11px 11px;
+  backdrop-filter: blur(18px) saturate(130%);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
+  box-shadow: inset 0 1px 0 rgba(var(--hl), 0.05);
+}
+.side-block.grow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* 房间列表撑满卡片：整列高度=右侧房间面板高度，左右两栏同顶同底 */
+.side-block.grow .side-list { flex: 1 1 auto; min-height: 0; }
+.side-cap {
+  /* 10 → 11 → 12.5（v197/v198）：这是全站最小的一档字号，10px 在 2x 屏上「全屋 / 房间」
+     几乎糊成一片；抬到 12.5 后跟 .alt-head b 同一个字号，字距从 1.6 收到 1.0
+     （13px 以上再用 1.6 三个字会被拉散） */
+  font-size: calc(12.5px * var(--fsk)); letter-spacing: 1px; color: rgba(var(--fg), 0.62);
+  margin-bottom: 9px; display: flex; justify-content: space-between; align-items: center;
+  /* 右侧的「3 处亮灯」跟下面的数值对齐，不能贴到卡片边上 */
+  padding-right: var(--srail);
+}
+/* 「房间」右边那句「2 处亮灯」：不继承标题的 1px 字距，单独小半档 */
+.side-cap i { font-style: normal; letter-spacing: 0; font-size: calc(11.5px * var(--fsk)); color: var(--dim); }
+.side-in { font-size: calc(15px * var(--fsk)); color: rgba(var(--am), 0.82); letter-spacing: 0; margin: -3px 0 9px; font-variant-numeric: tabular-nums; }
+.side-in em { font-style: normal; color: rgba(var(--fg), 0.62); font-size: calc(12px * var(--fsk)); margin-left: 5px; }
+/* 左栏统计行可点：点类别看全部设备，点「全屋」进概览 */
+.side-stat {
+  display: flex; align-items: baseline; gap: 7px;
+  margin: 0 -6px 4px; padding: 3px 6px; border-radius: 8px;
+  position: relative; cursor: pointer; transition: background .18s, color .18s;
+}
+.side-stat:hover { background: rgba(var(--hl), 0.06); }
+.side-stat:hover span { color: var(--text); }
+.side-stat::after {
+  content: "›"; position: absolute; right: 0; top: 50%;
+  transform: translateY(-54%); font-size: calc(13px * var(--fsk)); line-height: 1;
+  color: var(--amber); opacity: 0; transition: opacity .18s;
+}
+.side-stat:hover::after { opacity: 1; }
+.side-stat span { font-size: calc(13.5px * var(--fsk)); color: rgba(var(--fg), 0.66); flex: 1; }
+.side-stat b { font-size: calc(17px * var(--fsk)); font-weight: 500; color: rgba(var(--fg), 0.9); font-variant-numeric: tabular-nums; }
+.side-stat b.on { color: var(--amber); }
+/* 20px 而不是 16：总数会到「/25」这种三位（含斜杠）字符串，
+   16px 装不下就会往左溢、把数字挤到「4」的旁边；20px 刚好装住，
+   并且 width 固定 → 每行 b（4/0/0/0）的右缘完全相同，整列竖着一条线 */
+.side-stat em { font-style: normal; font-size: calc(11px * var(--fsk)); color: var(--dim-2); width: 22px; text-align: right; margin-right: var(--srail); }
+.side-in { cursor: pointer; }
+.side-in:hover { color: var(--text); }
+
+.side-list { overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.side-list::-webkit-scrollbar { width: 3px; }
+.side-list::-webkit-scrollbar-thumb { background: rgba(var(--fg), 0.16); border-radius: 3px; }
+.side-room {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 7px var(--srail); margin-bottom: 2px; border-radius: 8px;
+  background: transparent; border: 1px solid transparent;
+  color: rgba(var(--fg), 0.82); font-family: inherit; font-size: calc(13.5px * var(--fsk));
+  text-align: left; cursor: pointer; transition: background .18s, border-color .18s;
+}
+.side-room span { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-room b { font-weight: 400; font-size: calc(13px * var(--fsk)); color: rgba(var(--am), 0.85); font-variant-numeric: tabular-nums; }
+.side-room em { font-style: normal; width: 8px; height: 8px; border-radius: 50%; background: rgba(var(--fg), 0.18); }
+.side-room em.warm { background: var(--amber); box-shadow: 0 0 7px rgba(var(--am), 0.75); }
+.side-room:hover { background: rgba(var(--hl), 0.045); border-color: var(--line-soft); }
+.side-room.active { background: rgba(var(--am), 0.1); border-color: rgba(var(--am), 0.26); color: var(--text); }
+/* 「其他」：没上户型图的设备，用一条细分割线跟房间区分开 */
+.side-room.other { margin-top: 5px; border-top: 1px solid var(--line-soft); border-radius: 0 0 8px 8px; padding-top: 8px; }
+.side-room.other span { color: rgba(var(--fg), 0.7); }
+.plan { position: absolute; inset: 0; width: 100%; height: 100%; stroke: none; }
+
+.room-shape {
+  /* 没有 plan-wall-auto 了，room-shape fill 就是房间唯一的色块 —— 四季主题色浓度降一点 */
+  fill: rgba(var(--wall), 0.28);
+  /* 每个房间一圈细细的灰色线框，区分房间边界 */
+  stroke: rgba(var(--wall), 0.35);
+  stroke-width: 1;
+  transition: fill .25s, stroke .25s;
+  cursor: pointer;
+}
+.room-shape.t-warm { fill: rgba(var(--s1), 0.20); stroke: rgba(var(--wall), 0.35); }
+.room-shape.t-cool { fill: rgba(var(--s2), 0.16); stroke: rgba(var(--wall), 0.35); }
+.room-shape:hover { fill: rgba(var(--s1), 0.24); stroke: rgba(var(--s1), 0.42); }
+.room-shape.active { fill: rgba(var(--s1), 0.22); stroke: rgba(var(--s1), 0.6); stroke-width: 1.6; }
+.plan-wall { fill: rgba(var(--wall), 0.16); stroke: none; pointer-events: none; }
+/* 自动墙体：把所有房间 union 成整体后向外扩 wallW，fill-rule=evenodd 扣掉内部
+   → 得到统一的灰色填充墙带。外墙一圈连续，相邻房间共享墙自动融合成一道，
+   房间内部完全干净没有灰色线。 */
+.plan-wall-auto {
+  fill: rgba(var(--wall), 0.22);
+  stroke: none;
+  pointer-events: none;
+}
+.plan-solid { fill: rgba(var(--wall), 0.16); stroke: none; pointer-events: none; }
+.room-label-group { cursor: grab; pointer-events: auto; }
+.room-label-group:active { cursor: grabbing; }
+.room-label {
+  fill: rgba(var(--fg), 0.86); font-size: calc(13px * var(--fsk)); letter-spacing: .3px;
+  pointer-events: none; font-family: var(--font);
+}
+.room-temp {
+  fill: rgba(var(--am), 0.92); font-size: calc(11.5px * var(--fsk)); letter-spacing: .2px;
+  pointer-events: none; font-family: var(--font);
+  font-variant-numeric: tabular-nums;
+}
+.plan-hatch { pointer-events: none; }
+.plan-outline { fill: none; stroke: rgba(var(--wall), 0.22); stroke-width: 2; }
+.plan-dash {
+  fill: none; stroke: rgba(var(--s1), 0.5); stroke-width: 2.4;
+  stroke-dasharray: 11 18; stroke-linecap: round; pointer-events: none;
+}
+
+/* ── 现实风格底板（v235，v240 修订）────────────────────────────
+   #screen[data-skin=real] 时：SVG 里的照片层（透明 PNG）顶上来，扁平那套（底纹/墙/色块）
+   全部让位。虚线二选一：扁平外轮廓虚线（.plan-dash）隐藏，改走底图外框那条
+   （.plan-dash-photo，由底图 alpha 描出的房屋轮廓，JS 单独画）—— 用户要求虚线沿底图走。
+   房间点击区保留（fill 变透明但不是 none，命中测试照常），
+   hover/active 反馈换浅色描边（这三条必须带 [data-skin] 前缀，否则权重压不过上面）。
+   标签加米白描边（paint-order: stroke 在文字下面垫一圈），压在花照片上也读得清。
+   深色主题下照片压暗一档，不然黑屋里糊着一小块亮堂堂的。 */
+.plan-photo { display: none; pointer-events: none; }
+.screen[data-skin=real] .plan-photo { display: block; }
+.screen[data-skin=real] .plan-hatch,
+.screen[data-skin=real] .plan-wall,
+.screen[data-skin=real] .plan-wall-auto,
+.screen[data-skin=real] .plan-solid { display: none; }
+.plan-dash-photo { display: none; }
+.screen[data-skin=real] .plan-dash { display: none; }
+.screen[data-skin=real] .plan-dash-photo { display: block; }
+.screen[data-skin=real] .room-shape,
+.screen[data-skin=real] .room-shape.t-warm,
+.screen[data-skin=real] .room-shape.t-cool { fill: transparent; stroke: rgba(var(--fg), 0.07); }
+.screen[data-skin=real] .room-shape:hover { fill: rgba(var(--s1), 0.10); stroke: rgba(var(--s1), 0.45); }
+.screen[data-skin=real] .room-shape.active { fill: rgba(var(--s1), 0.09); stroke: rgba(var(--s1), 0.6); stroke-width: 1.6; }
+.screen[data-skin=real] .room-label,
+.screen[data-skin=real] .room-temp {
+  paint-order: stroke; stroke: rgba(255, 253, 247, 0.82); stroke-width: 3px; stroke-linejoin: round;
+}
+/* 深色档：照片压暗后底色偏深，浅色文字再垫白边会糊成白块 —— 换深色描边托住浅字 */
+.screen:not([data-theme=light])[data-skin=real] .room-label,
+.screen:not([data-theme=light])[data-skin=real] .room-temp {
+  stroke: rgba(24, 20, 14, 0.78);
+}
+.screen:not([data-theme=light])[data-skin=real] .plan-photo { filter: brightness(.68) saturate(.88); }
+
+
+.marker { cursor: pointer; transition: opacity .25s; }
+.marker .mkin { transition: transform .16s ease-out; transform-box: fill-box; transform-origin: center; }
+.marker:hover .mkin { transform: scale(1.12); }
+.marker .halo { fill: url(#halo); opacity: 1; pointer-events: none; transition: opacity .3s; }
+.marker circle.dot { fill: var(--amber); filter: drop-shadow(0 3px 9px rgba(var(--am), 0.42)); }
+.marker .ico { fill: none; stroke: #2b2115; stroke-width: 1.7; }
+.marker.off .halo { opacity: 0; }
+/* 悬停即亮光圈：明确告诉用户「这里是个可点的设备」，关态也亮 */
+.marker:hover .halo { opacity: 1; }
+.marker.off:hover .halo { opacity: .5; }
+.marker:hover .dot { stroke: var(--amber-2); stroke-width: 1.2; }
+.marker.off circle.dot { fill: rgba(var(--am), 0.10); stroke: rgba(var(--am), 0.52); stroke-width: 1.1; filter: none; }
+.marker.off .ico { stroke: rgba(var(--am), 0.78); }
+/* 筛选：不匹配的设备整个隐去（淡出 + 内层缩小，外层 translate 不动） */
+.marker.dim { opacity: 0; pointer-events: none; }
+.marker.dim .mkin { transform: scale(.45); }
+.marker .hit { fill: transparent; }
+/* 底盘：始终不透明，保证图标压在房间色块之上，不会被底色透穿 */
+.marker .cap { fill: rgba(9, 12, 18, 0.88); pointer-events: none; }
+.marker.off .cap { fill: rgba(9, 12, 18, 0.82); }
+
+/* 浅色主题的标记配色（这里是唯一真相，别在别处再写 .marker .ico）
+   坑：v50 给关态加了近白底盘 cap，而浅色 .ico 是 #fff8ec 近白 —— 白图标画在白底上等于隐形。
+   所以浅色必须给关态单独指定深琥珀图标，并加重外圈，否则整块图标只剩个模糊的白圆。 */
+.screen[data-theme=light] .marker .cap { fill: rgba(255, 252, 245, 0.94); }
+.screen[data-theme=light] .marker.off .cap { fill: rgba(252, 248, 240, 0.92); }
+/* 亮态：底色压深一档，近白图标 5.4:1（改前 3.8:1） */
+.screen[data-theme=light] .marker circle.dot { fill: #8a5f1e; filter: drop-shadow(0 3px 8px rgba(var(--am), 0.3)); }
+/* 关态：浅盘 + 深琥珀图标 5.5:1；外圈 .92 让圆盘在浅色房间块上有轮廓 */
+.screen[data-theme=light] .marker.off circle.dot {
+  fill: rgba(var(--am), 0.2);
+  stroke: rgba(var(--am), 0.92);
+  stroke-width: 1.2;
+}
+.screen[data-theme=light] .marker.off .ico { stroke: #6f4d16; stroke-width: 2.1; }
+.screen[data-theme=light] .marker:hover circle.dot { stroke: var(--amber-2); stroke-width: 1.4; }
+
+.plan-badge {
+  position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%);
+  font-size: calc(11px * var(--fsk)); color: var(--dim-2); letter-spacing: .6px; white-space: nowrap;
+}
+.plan-badge i { color: rgba(var(--am), 0.6); font-style: normal; }
+
+/* ── 底部筛选 ── */
+/* 底部一条：页面切换 + 图层筛选。z-index 高于子页面（8），所以进「概览/家电/说明」时
+   这条仍在，且只留页面切换那一组（.tabs-only），随时能点回首页 */
+.filters {
+  /* 视觉重心偏左：整屏几何居中时会压在右侧面板边缘，往左让 75px 才落在户型正中 */
+  /* bottom 保持 20：底部这块位置用户不动，虚线贴底的问题由 liftPlan() 整体上移户型解决 */
+  position: absolute; left: 50%; bottom: 20px; transform: translateX(calc(-50% - 75px));
+  display: flex; align-items: center; gap: 6px; z-index: 9;
+  max-width: calc(100% - 24px);
+  padding: 6px; border-radius: 999px;
+  background: var(--panel-soft); border: 1px solid var(--line-soft);
+  backdrop-filter: blur(12px);
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none;
+}
+.filters::-webkit-scrollbar { display: none; }
+.fgroup { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.fsep { flex: 0 0 auto; width: 1px; height: 20px; background: var(--line-soft); margin: 0 2px; }
+/* 只有一个「强高亮」：当前页面用琥珀药丸；筛选项被选中只染字色（「全部」默认常亮，
+   两处都给药丸会看着像同时选中了两项） */
+#filterChips .filter.active { background: none; border-color: transparent; color: var(--amber-2); }
+/* 子页面上筛选组不隐藏、只淡出并禁用：整条宽度不变，页面 tab 不会左右跳（跳会点错） */
+.filters.tabs-only #filterChips { opacity: .3; pointer-events: none; }
+.filters.tabs-only .fsep { opacity: .45; }
+.filter {
+  display: inline-flex; align-items: center; gap: 6px;
+  flex: 0 0 auto; white-space: nowrap;
+  padding: 7px 14px; border-radius: 999px; border: 1px solid transparent;
+  background: none; color: var(--dim); font-family: inherit; font-size: calc(12.5px * var(--fsk)); cursor: pointer;
+  transition: .18s;
+}
+.filter svg { width: 14px; height: 14px; }
+.filter:hover { color: var(--text); background: rgba(var(--hl), 0.06); }
+.filter.active { color: var(--amber-2); background: var(--amber-soft); border-color: rgba(var(--am), 0.36); }
+
+/* ── 房间面板 ── */
+/* 房间面板与「天气·用电」占同一个格子（第三列第一行），互斥显隐：
+   列宽恒定为 --rpw，所以两者之间怎么切，户型都不会左右横移。 */
+.room-panel, .alt-panel { grid-column: 3; grid-row: 1; }
+/* 右列面板跟左栏是同一套卡片语言：同圆角、同描边、同雾面底、同内距。
+   以前它 16px 圆角 + 重描边 + 大投影 + 16px 内距，跟左栏摆一起像两套设计。 */
+.room-panel {
+  /* 宽度跟 .stage 的第三列一致：只有两者相等，开合才完全不影响户型位置 */
+  position: static; width: var(--rpw, 302px); height: 100%; max-height: none;
+  display: flex; flex-direction: column;
+  background: rgba(var(--pane-rgb), var(--pane-a));
+  border: 1px solid var(--line-soft); border-radius: 14px;
+  backdrop-filter: blur(18px) saturate(130%);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
+  box-shadow: inset 0 1px 0 rgba(var(--hl), 0.05);
+  z-index: 7; overflow: hidden;
+  animation: slidein .22s ease-out;
+}
+@keyframes slidein { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+.rp-head { display: flex; align-items: center; justify-content: space-between; padding: 11px 12px 10px; border-bottom: 1px solid var(--line-soft); }
+.rp-head b { font-size: calc(13.5px * var(--fsk)); font-weight: 500; display: block; }
+.rp-head span { font-size: calc(11.5px * var(--fsk)); color: rgba(var(--fg), 0.6); display: block; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.rp-head .close { padding: 3px 9px; font-size: calc(12px * var(--fsk)); }
+.rp-body { overflow-y: auto; padding: 8px 12px 12px; }
+.rp-body::-webkit-scrollbar { width: 3px; }
+.rp-body::-webkit-scrollbar-thumb { background: rgba(var(--fg), 0.18); border-radius: 3px; }
+/* 分区标题对齐左栏的 .side-cap（12.5px / 字距 1 / 同灰度）—— v198 两处锁死同一套，改一起改 */
+.rp-group { font-size: calc(12.5px * var(--fsk)); letter-spacing: 1px; color: rgba(var(--fg), 0.6); margin: 10px 0 2px; }
+.rp-group:first-child { margin-top: 2px; }
+/* 行距对齐左栏 .side-room：13.5px 字、32~34 高，图标缩成一个小色标而不是 28px 方块（v197 随左栏抬一档） */
+.rp-item {
+  display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 5px 0;
+  border-bottom: 1px solid rgba(var(--ln), 0.05);
+}
+.rp-item:last-child { border-bottom: 0; }
+.rp-item .ri { width: 16px; height: 16px; border-radius: 0; display: grid; place-items: center; background: none; color: rgba(var(--am), 0.8); flex: none; }
+.rp-item .ri svg { width: 13px; height: 13px; }
+.rp-item .rn { flex: 1; min-width: 0; font-size: calc(13.5px * var(--fsk)); line-height: 1.3; }
+/* min-width:0 + 省略号：右侧多了「设置」按钮后，副标题不能再把条目撑宽 */
+.rp-item .rn i { display: block; font-size: calc(11px * var(--fsk)); color: var(--dim-2); font-style: normal; margin-top: 1px;
+  line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rp-item .rv { font-size: calc(12.5px * var(--fsk)); color: var(--dim); }
+.sw {
+  width: 40px; height: 23px; border-radius: 999px; border: 1px solid var(--line);
+  background: rgba(var(--hl), 0.07); position: relative; cursor: pointer; flex: none; padding: 0;
+  transition: background .2s, border-color .2s;
+}
+.sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%; background: rgba(var(--fg), 0.7); transition: transform .2s, background .2s; }
+.sw.on { background: rgba(var(--am), 0.85); border-color: rgba(var(--am), 0.9); }
+.sw.on::after { transform: translateX(17px); background: #241c11; }
+.rp-empty { font-size: calc(13px * var(--fsk)); color: var(--dim-2); padding: 10px 0; }
+/* 复合设备（中控面板 / 门铃 / 门锁）在房间面板里的入口按钮 */
+.rgo {
+  flex: none; padding: 5px 11px; font-size: calc(12.5px * var(--fsk)); border-radius: 999px;
+  border: 1px solid rgba(var(--am), 0.38); background: var(--amber-soft);
+  color: var(--amber-2); cursor: pointer; font-family: var(--font);
+}
+.rgo:hover { border-color: rgba(var(--am), 0.6); }
+
+/* ── 只读状态行 ── */
+.rp-item.ro { padding: 5px 0; }
+.rp-item.ro .rv { color: var(--amber-2); font-variant-numeric: tabular-nums; text-align: right; }
+.rp-item.ro .rn { color: rgba(var(--fg), .84); font-size: calc(13.5px * var(--fsk)); }
+/* 房间面板一律单列：双列会把右列拆成两个 180px，设备名全变省略号，
+   而且行距跟左栏对不上。设备多的房间让面板自己滚，跟左栏房间列表一致。 */
+
+/* ── 面板关闭时的常驻栏：常用设备 + 安防网关（v166 起，原本是天气 + 用电占位卡） ── */
+.alt-panel {
+  position: static; width: var(--rpw, 384px); height: 100%; max-height: none;
+  display: flex; flex-direction: column;
+  background: rgba(var(--pane-rgb), var(--pane-a));
+  border: 1px solid var(--line-soft); border-radius: 14px;
+  backdrop-filter: blur(18px) saturate(130%);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
+  box-shadow: inset 0 1px 0 rgba(var(--hl), 0.05);
+  z-index: 7; overflow: hidden;
+  animation: slidein .22s ease-out;
+}
+.alt-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 12px 10px; border-bottom: 1px solid var(--line-soft);
+}
+.alt-head b { font-size: calc(13.5px * var(--fsk)); font-weight: 500; }
+.alt-body {
+  /* v198 抬字号后 16 行要多出 34px，上下内距 10/12 → 8/10 再让 4px */
+  overflow-y: auto; padding: 8px 12px 10px;
+  scrollbar-width: thin; scrollbar-color: rgba(var(--fg), 0.18) transparent;
+}
+.alt-body::-webkit-scrollbar { width: 3px; }
+.alt-body::-webkit-scrollbar-track { background: transparent; }
+.alt-body::-webkit-scrollbar-thumb { background: rgba(var(--fg), 0.18); border-radius: 3px; }
+.alt-body:hover::-webkit-scrollbar-thumb { background: rgba(var(--fg), 0.3); }
+/* v198 字号抬一档后（行内文字 12→13.5、开关 23 就是行内最高的东西），16 行会多出 34px，
+   常驻栏就滚起来了。省的全是「行间留白」，字一个没缩：卡片间距 13→11、标题下 4→3、
+   行内距 4.5→4、副标题行高 1.35→1.2，正好把多出来的 34px 吃回去。 */
+.alt-card { padding-top: 11px; margin-top: 11px; border-top: 1px solid var(--line-soft); }
+.alt-card:first-child { padding-top: 0; margin-top: 0; border-top: 0; }
+.alt-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.alt-h b { font-size: calc(13.5px * var(--fsk)); font-weight: 500; }
+/* 标题右侧那句「点开关直控 · 点行看更多」——比 dim 更淡，别抢标题 */
+.alt-note { font-size: calc(11px * var(--fsk)); color: var(--dim-2); letter-spacing: .2px; }
+.alt-more {
+  font-family: var(--font); font-size: calc(11.5px * var(--fsk)); color: var(--amber-2);
+  background: none; border: 0; padding: 2px 0; cursor: pointer;
+}
+.alt-more:hover { text-decoration: underline; }
+.alt-hint { font-size: calc(11.5px * var(--fsk)); line-height: 1.8; color: var(--dim); padding: 4px 0 2px; }
+/* 常驻栏里的设备行：跟 .klist 一样给「可点」的反馈（房间面板里那套没有 hover，
+   这里必须加，否则十来行开关看上去跟只读列表分不出来） */
+/* 16 行（10 常用 + 6 安防）要一屏放完：内边距 5→4.5 收 16px，
+   加上 min-height 30→28，正好压进 608px 的可见高度（房间面板仍是原样，互不影响）。
+   再紧就比左栏房间列表明显密一档了，所以只收到这里。 */
+.alt-panel .rp-item { cursor: pointer; min-height: 27px; padding: 4px 0; }
+.alt-panel .rp-item .rn i { line-height: 1.2; }
+.alt-panel .rp-item:hover .rn { color: var(--amber-2); }
+/* 网关那两行是只读状态，不该有手型 */
+.alt-panel .rp-item.ro { cursor: default; }
+.alt-panel .rp-item.ro:hover .rn { color: rgba(var(--fg), .84); }
+
+.room-glow { pointer-events: none; }
+.lamp { opacity: 0; transition: opacity .55s ease; }
+
+/* ── 摄像机 ── */
+.cam-slot { position: relative; overflow: hidden; cursor: pointer; transition: border-color .2s; }
+.cam-slot:hover { border-color: rgba(var(--am), .45); }
+.cam-slot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cam-slot b { position: absolute; left: 9px; bottom: 7px; font-size: calc(10.5px * var(--fsk)); font-weight: 400; color: rgba(var(--hl), .9); text-shadow: 0 1px 5px rgba(0, 0, 0, .9); z-index: 2; }
+.cam-slot:not(.empty) > svg { display: none; }
+.cam-big {
+  position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden;
+  background: #080b10; display: grid; place-items: center; border: 1px solid var(--line-soft);
+}
+.cam-big img { width: 100%; height: 100%; object-fit: cover; }
+.cam-load { font-size: calc(12px * var(--fsk)); color: var(--dim-2); }
+/* 取不到图时的占位（底色写死 #080b10，所以字和图标也必须写死浅色，
+   不能用 var(--fg)/var(--dim) —— 浅色主题下那几个变量是深灰，会变黑底黑字） */
+.cam-big.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+.cam-big.empty svg { width: calc(30px * var(--fsk)); height: calc(30px * var(--fsk)); color: rgba(255, 255, 255, .38); }
+.cam-big.empty b { font-size: calc(12px * var(--fsk)); font-weight: 400; color: rgba(255, 255, 255, .68); }
+.cam-tip { margin-top: 12px; font-size: calc(11.5px * var(--fsk)); color: var(--dim-2); line-height: 1.7; }
+
+/* ── 网关状态 / 家电行 ── */
+.gate-list { display: flex; flex-direction: column; gap: 7px; }
+.gate { display: flex; align-items: center; gap: 8px; font-size: calc(12px * var(--fsk)); color: var(--dim); }
+.gate i { width: 6px; height: 6px; border-radius: 50%; background: rgba(var(--fg), .22); flex: none; }
+.gate i.ok { background: #6ec48a; box-shadow: 0 0 8px rgba(110, 196, 138, .55); }
+.gate i.no { background: #c9685c; }
+.gate span { flex: 1; }
+.gate b { font-weight: 400; color: var(--text); font-size: calc(11.5px * var(--fsk)); }
+
+/* 概览 · 家人（v217，ping 判定在线；在家=绿点，离家=灰点，不用红——离家不是异常） */
+.ppl-grid { display: flex; flex-direction: column; gap: 7px; }
+.ppl-i { display: flex; align-items: center; gap: 8px; font-size: calc(12px * var(--fsk)); color: var(--dim); }
+.ppl-i i { width: 6px; height: 6px; border-radius: 50%; background: rgba(var(--fg), .22); flex: none; }
+.ppl-i i.ok { background: #6ec48a; box-shadow: 0 0 8px rgba(110, 196, 138, .55); }
+.ppl-i i.no { background: rgba(var(--fg), .22); }
+.ppl-i span { flex: 1; }
+.ppl-i.on span { color: var(--text); }
+.ppl-i b { font-weight: 400; color: var(--text); font-size: calc(11.5px * var(--fsk)); }
+/* v222：配了手表的那行（墨墨）名字下面多一条小字：手表 97% · 未充电 · 在哪。
+   名字和小字包进 .ppl-m 之后仍是「点 · 文字 · 在家」三点一线，
+   原来 span 的 flex:1 交给 .ppl-m，右侧「在家/离家」不会被长地址顶走。
+   小字比正文再小一档（10.5），超过一行截断 —— 学校名那种十几字的地址不能折行。 */
+.ppl-m { flex: 1; min-width: 0; }
+.ppl-m span { display: block; line-height: 1.25; }
+.ppl-m em {
+  display: block; margin-top: 2px; font-style: normal;
+  font-size: calc(10.5px * var(--fsk)); line-height: 1.3; color: var(--dim-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ppl-i.has-w { align-items: flex-start; }
+.ppl-i.has-w i.d { margin-top: 4px; }
+.ppl-i.has-w b { margin-top: 1px; }
+/* 电量 ≤20%：小字点成琥珀色（和「在用」那套光环同一个语义色），别用红 */
+.ppl-i.low .ppl-m em { color: rgba(var(--am), .95); }
+/* v223：带手表小字的那行可点 → 开手表详情弹窗（跟 .card.tap 同一套反馈） */
+.ppl-i.tap { cursor: pointer; border-radius: 7px; padding: 2px 4px; margin: -2px -4px; }
+.ppl-i.tap:hover { background: rgba(var(--hl), 0.06); }
+.ppl-i.tap:hover .ppl-m span { color: var(--text); }
+
+/* 概览 · 各屋温湿度（跟电池卡同一套网格语言：跨两列时排三列，否则两列） */
+.env-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 16px; }
+.card.wide .env-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 18px; }
+.env-i {
+  display: grid; grid-template-columns: 1fr 46px 42px; align-items: baseline; gap: 8px;
+  font-size: calc(11.5px * var(--fsk));
+}
+.env-i span { color: rgba(var(--fg), 0.84); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.env-i b { font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
+.env-i em { font-style: normal; color: var(--dim-2); font-variant-numeric: tabular-nums; text-align: right; }
+
+/* 概览 · 电池与耗材（两列排布 + 耗材条；低量用 --bad，跟 .gate 的红点同一套语义） */
+.sup-sec {
+  font-size: calc(10px * var(--fsk)); letter-spacing: 1.4px;
+  color: rgba(var(--fg), 0.6); margin: 11px 0 5px;
+}
+.sup-sec:first-child { margin-top: 2px; }
+.sup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
+.sup-i { display: flex; align-items: center; gap: 7px; font-size: calc(11.5px * var(--fsk)); }
+.sup-i i { width: 6px; height: 6px; border-radius: 50%; flex: none; background: rgba(var(--fg), 0.22); }
+.sup-i i.ok { background: #6ec48a; }
+.sup-i i.mid { background: rgba(var(--am), 0.85); }
+.sup-i i.no { background: var(--bad); }
+.sup-i span {
+  flex: 1; min-width: 0; color: rgba(var(--fg), 0.84);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sup-i b { font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; }
+.sup-i.low b { color: var(--bad); }
+.sup-bars { display: flex; flex-direction: column; gap: 7px; }
+.sup-b {
+  display: grid; grid-template-columns: 92px 1fr 38px; align-items: center; gap: 9px;
+  font-size: calc(11.5px * var(--fsk));
+}
+.sup-b span {
+  color: rgba(var(--fg), 0.84); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sup-bar { height: 5px; border-radius: 3px; background: rgba(var(--fg), 0.12); overflow: hidden; }
+.sup-bar i {
+  display: block; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, rgba(var(--am), 0.45), rgba(var(--am), 0.9));
+}
+.sup-b.low .sup-bar i { background: linear-gradient(90deg, rgba(232, 144, 124, .5), var(--bad)); }
+.sup-b b {
+  font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; text-align: right;
+}
+.sup-b.low b { color: var(--bad); }
+/* v174：这张卡跨两列时横向有 690px 可用，电池排三列、耗材排两列 ——
+   11 节电池 + 4 项耗材压到 4 行 + 2 行，一屏看全不用往下滚。 */
+.card.wide .sup-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px 14px; }
+.card.wide .sup-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 18px; }
+
+.app-line {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: calc(12px * var(--fsk)); color: var(--dim); padding: 5px 0;
+  border-bottom: 1px solid rgba(var(--ln), .05);
+}
+.app-line:last-child { border-bottom: 0; }
+.app-line b { font-weight: 400; color: var(--text); font-variant-numeric: tabular-nums; }
+
+
+/* ── 卡片（概览 / 家电都长在浮层里了，不再有整屏子页） ── */
+.close {
+  padding: 7px 16px; border-radius: 999px; border: 1px solid var(--line);
+  background: none; color: rgba(var(--fg), 0.82); font-family: inherit; font-size: calc(12.5px * var(--fsk)); cursor: pointer;
+}
+.close:hover { color: var(--text); border-color: rgba(var(--ln), 0.3); }
+.cards {
+  display: grid; gap: 14px; overflow-y: auto; padding-right: 4px; flex: 1;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  align-content: start;
+  width: 100%; max-width: 1120px; margin: 0 auto;
+}
+.cards::-webkit-scrollbar { width: 3px; }
+.cards::-webkit-scrollbar-thumb { background: rgba(var(--fg), 0.16); }
+.card {
+  background: linear-gradient(180deg, rgba(var(--hl), 0.045), rgba(var(--hl), 0.015));
+  border: 1px solid var(--line-soft); border-radius: 14px; padding: 15px 16px;
+  min-height: 96px; display: flex; flex-direction: column; gap: 10px;
+}
+.card.wide { grid-column: span 2; }
+.card-head { display: flex; align-items: center; gap: 8px; font-size: calc(12.5px * var(--fsk)); color: var(--dim); }
+.card-head svg { width: 15px; height: 15px; color: rgba(var(--am), 0.8); }
+.card-head .badge { margin-left: auto; font-size: calc(10px * var(--fsk)); padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim-2); }
+.kv { display: flex; align-items: baseline; gap: 6px; }
+.kv b { font-size: calc(26px * var(--fsk)); font-weight: 300; letter-spacing: .5px; }
+.kv span { font-size: calc(12px * var(--fsk)); color: var(--dim-2); }
+.card-sub { font-size: calc(11.5px * var(--fsk)); color: var(--dim-2); line-height: 1.6; }
+.bars { display: flex; align-items: flex-end; gap: 6px; height: 46px; }
+.bars i { flex: 1; border-radius: 3px 3px 0 0; background: linear-gradient(180deg, rgba(var(--am), 0.7), rgba(var(--am), 0.16)); }
+/* 概览 · 用电卡片的三宫格 */
+.pwr { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pwr-i {
+  background: rgba(var(--hl), 0.04); border: 1px solid var(--line-soft);
+  border-radius: 10px; padding: 7px 9px;
+}
+.pwr-i em { display: block; font-style: normal; font-size: calc(11px * var(--fsk)); color: var(--dim-2); }
+.pwr-i b {
+  display: block; font-size: calc(14px * var(--fsk)); font-weight: 400; color: var(--text);
+  margin-top: 3px; font-variant-numeric: tabular-nums;
+}
+/* 概览页「其他设备」列表 */
+.oth { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.oth-i { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; }
+.oth-i span { flex: 1; font-size: calc(12.5px * var(--fsk)); color: rgba(var(--fg), 0.84); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oth-i span i { font-style: normal; font-size: calc(10px * var(--fsk)); color: var(--dim-2); margin-left: 6px; }
+.oth-i b { font-size: calc(11.5px * var(--fsk)); font-weight: 400; color: var(--dim); font-variant-numeric: tabular-nums; }
+.oth-i b.on { color: var(--amber-2); }
+/* 可点击的卡片 */
+.card.tap { cursor: pointer; transition: border-color .18s, background .18s; }
+.card.tap:hover { border-color: rgba(var(--am), 0.36); background: rgba(var(--hl), 0.05); }
+
+/* ── 用电详情弹窗 ── */
+.pw-detail { display: flex; flex-direction: column; gap: 12px; }
+.pw-big { display: flex; align-items: baseline; gap: 8px; }
+.pw-big b { font-size: calc(40px * var(--fsk)); font-weight: 200; letter-spacing: .6px; color: var(--amber-2); font-variant-numeric: tabular-nums; }
+.pw-big span { font-size: calc(12px * var(--fsk)); color: var(--dim); }
+.pw-detail .rp-group { margin: 0; }
+.pw-split { display: flex; flex-direction: column; gap: 8px; }
+.pw-seg { display: grid; grid-template-columns: 34px 82px 1fr 34px; align-items: center; gap: 8px; font-size: calc(12px * var(--fsk)); }
+.pw-seg em { font-style: normal; color: var(--dim); }
+.pw-seg b { font-weight: 400; color: var(--text); font-variant-numeric: tabular-nums; }
+.pw-seg i { height: 6px; border-radius: 3px; background: rgba(var(--hl), 0.07); overflow: hidden; display: block; }
+.pw-seg i u { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, rgba(var(--am), 0.5), rgba(var(--am), 0.9)); }
+.pw-seg span { text-align: right; font-size: calc(11px * var(--fsk)); color: var(--dim-2); font-variant-numeric: tabular-nums; }
+.pw-chart { display: flex; gap: 7px; height: 108px; }
+.pw-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; align-items: center; }
+.pw-col b { font-size: calc(10px * var(--fsk)); font-weight: 400; color: var(--dim-2); font-variant-numeric: tabular-nums; }
+.pw-bar { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.pw-bar i {
+  width: 100%; max-width: 26px; min-height: 2px; border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, rgba(var(--am), 0.78), rgba(var(--am), 0.14));
+}
+.pw-col em { font-style: normal; font-size: calc(9.5px * var(--fsk)); color: var(--dim-2); }
+.pw-rows > div {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 7px 0; font-size: calc(12.5px * var(--fsk)); border-bottom: 1px solid rgba(var(--ln), 0.05);
+}
+.pw-rows > div:last-child { border-bottom: 0; }
+.pw-rows span { color: var(--dim); }
+.pw-rows b { font-weight: 400; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* ── 类别设备列表弹窗 ── */
+.klist { display: flex; flex-direction: column; }
+.klist .rp-group { margin: 10px 0 4px; }
+.klist .rp-item { cursor: pointer; }
+.klist .rp-item:hover .rn { color: var(--amber-2); }
+.klist .rp-item:first-child { margin-top: 0; }
+
+/* ── 其他设备：米家已入网、本页未接入的清单 ───────────────── */
+.miss-note { font-size: calc(12px * var(--fsk)); line-height: 1.65; color: var(--dim); padding: 0 0 8px; }
+.miss-note b { color: var(--amber-2); font-weight: 600; }
+.miss-grp { font-size: calc(10.5px * var(--fsk)); letter-spacing: 1.1px; color: var(--dim-2);
+  margin: 12px 0 7px; padding-top: 9px; border-top: 1px solid var(--line-soft); }
+.miss-grp:first-of-type { margin-top: 4px; }
+.miss-i { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; width: 100%;
+  text-align: left; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 10px; padding: 7px 10px; margin-bottom: 5px; cursor: pointer; }
+.miss-i:hover { border-color: rgba(var(--fg), 0.22); }
+.miss-i .mi-n { grid-column: 1; grid-row: 1; font-size: calc(13px * var(--fsk)); color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.miss-i .mi-m { grid-column: 1; grid-row: 2; font-size: calc(11px * var(--fsk)); color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.miss-i .mi-b { grid-column: 2; grid-row: 1; font-size: calc(11.5px * var(--fsk)); color: var(--dim);
+  font-weight: 500; white-space: nowrap; align-self: center; }
+.miss-i .mi-b.off { grid-column: 2; grid-row: 2; color: var(--bad); align-self: start; }
+.miss-i.dead { opacity: .72; }
+.miss-i.open { border-color: rgba(var(--fg), 0.26); }
+.mi-ents { margin: -2px 0 8px; padding: 8px 10px 6px; border: 1px solid var(--line);
+  border-top: none; border-radius: 0 0 10px 10px; background: var(--panel);
+  /* 31 个实体的设备能把整页顶穿，这里自己滚；滚动条样式跟 .layer-body 一套 */
+  max-height: 190px; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: rgba(var(--fg), 0.18) transparent; }
+.mi-ents::-webkit-scrollbar { width: 4px; }
+.mi-ents::-webkit-scrollbar-track { background: transparent; }
+.mi-ents::-webkit-scrollbar-thumb { background: rgba(var(--fg), 0.18); border-radius: 3px; }
+.mi-ents:hover::-webkit-scrollbar-thumb { background: rgba(var(--fg), 0.3); }
+.mi-doms { font-size: calc(11px * var(--fsk)); color: var(--dim); margin-bottom: 5px; }
+.mi-ents code { display: block; font-size: calc(10.5px * var(--fsk)); line-height: 1.55; color: var(--dim);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  word-break: break-all; }
+.miss-empty { font-size: calc(12px * var(--fsk)); color: var(--dim-2); padding: 10px 0; }
+.cam-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* 抓图是 16:9 的画面：固定 96px 高时两列各 340 宽，object-fit:cover 会把画面上下裁掉一大块，
+   看着像被压扁。改成按画面比例占位（最小 116，窄屏也不会挤成一条），空/离线格子跟着同一比例对齐 */
+.cam-slot {
+  border: 1px dashed var(--line); border-radius: 10px;
+  aspect-ratio: 16 / 9; height: auto; min-height: 116px;
+  display: grid; place-items: center; color: var(--dim-2); font-size: calc(11.5px * var(--fsk)); gap: 6px;
+}
+.cam-slot svg { width: 22px; height: 22px; color: var(--dim-2); }
+.app-row { display: flex; align-items: center; gap: 12px; }
+.theme-row { display: flex; gap: 8px; margin: 10px 0 4px; }
+.theme-btn { padding: 8px 14px; font-size: calc(12.5px * var(--fsk)); border-radius: 11px; border: 1px solid var(--line); background: var(--panel-2); color: var(--dim); cursor: pointer; font-family: var(--font); }
+.theme-btn.on { background: var(--amber-soft); border-color: rgba(var(--am), 0.45); color: var(--amber-2); }
+.theme-row.season { flex-wrap: wrap; }
+/* 面板透明度滑块 */
+.pane-row { display: flex; align-items: center; gap: 12px; margin: 10px 0 6px; flex-wrap: wrap; }
+.pane-rng { flex: 1 1 220px; max-width: 340px; height: 22px; accent-color: var(--amber); cursor: pointer; }
+.pane-row b { font-size: calc(12.5px * var(--fsk)); color: var(--amber-2); min-width: 42px; font-variant-numeric: tabular-nums; }
+/* 字体大小那一行的「当前放大 15%」提示：比数值淡一档，宽度留够免得数值跳动 */
+.fs-note { font-size: calc(11.5px * var(--fsk)); color: var(--dim); min-width: 104px; }
+/* 设置 → 接入说明：三块可折叠卡片（天气 / 用电 / 家人 IP） */
+.set-help-lead { margin: 2px 0 10px; color: var(--dim); font-size: calc(12.5px * var(--fsk)); line-height: 1.75; }
+.set-help-list { display: grid; gap: 10px; margin: 8px 0 12px; }
+.set-help { border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); padding: 0 12px; }
+.set-help[open] { padding-bottom: 10px; }
+.set-help > summary {
+  cursor: pointer; padding: 10px 0; font-size: calc(13px * var(--fsk)); color: var(--amber-2);
+  list-style: none; display: flex; align-items: center; gap: 8px;
+}
+.set-help > summary::-webkit-details-marker { display: none; }
+.set-help > summary::before { content: '▸'; display: inline-block; transition: transform .15s; }
+.set-help[open] > summary::before { transform: rotate(90deg); }
+.set-help ol, .set-help ul { margin: 4px 0 0; padding-left: 18px; }
+.set-help li { margin: 3px 0; font-size: calc(12.5px * var(--fsk)); line-height: 1.75; color: rgba(var(--fg), 0.82); }
+.set-help .warn { color: var(--amber-2); }
+.theme-btn .sdot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-right: 6px; vertical-align: 0;
+  box-shadow: 0 0 0 1px rgba(var(--fg), 0.16);
+}
+.theme-btn[data-season=auto] .sdot { background: linear-gradient(135deg, #8ac682, #58b2c6 35%, #e4984e 68%, #94b2d4); }
+.theme-btn[data-season=spring] .sdot { background: #8ac682; }
+.theme-btn[data-season=summer] .sdot { background: #58b2c6; }
+.theme-btn[data-season=autumn] .sdot { background: #e4984e; }
+.theme-btn[data-season=winter] .sdot { background: #94b2d4; }
+.app-card { cursor: pointer; transition: border-color .2s; }
+.app-card:hover { border-color: rgba(var(--am), 0.42); }
+.app-lines { border: 1px solid var(--line-soft); border-radius: 12px; padding: 2px 12px; margin-bottom: 4px; }
+.app-ico { width: 38px; height: 38px; border-radius: 11px; background: rgba(var(--hl), 0.05); display: grid; place-items: center; color: var(--amber); flex: none; }
+.app-ico svg { width: 20px; height: 20px; }
+.app-name { font-size: calc(13px * var(--fsk)); }
+.app-name i { display: block; font-style: normal; font-size: calc(11px * var(--fsk)); color: var(--dim-2); margin-top: 2px; }
+.pbar { height: 4px; border-radius: 3px; background: rgba(var(--hl), 0.08); overflow: hidden; }
+.pbar i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, rgba(var(--am), 0.55), var(--amber)); }
+
+.about-body { overflow-y: auto; width: 100%; max-width: 760px; margin: 0 auto; font-size: calc(13.5px * var(--fsk)); line-height: 1.9; color: rgba(var(--fg), 0.82); }
+.about-body h3 { font-size: calc(13.5px * var(--fsk)); font-weight: 500; margin: 20px 0 6px; color: var(--amber-2); }
+.about-body h3:first-child { margin-top: 0; }
+.about-body code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: calc(12px * var(--fsk)); background: rgba(var(--hl), 0.07); padding: 2px 6px; border-radius: 5px; }
+.about-body ul { margin: 6px 0; padding-left: 18px; }
+.about-body li { margin: 4px 0; }
+.about-body .muted { color: var(--dim-2); }
+
+/* ── 关于模块 ── */
+.about-box {
+  display: flex; align-items: center; gap: 16px; padding: 14px 16px;
+  background: rgba(var(--hl), 0.045); border-radius: 12px; border: 1px solid rgba(var(--line), 0.6);
+  margin: 10px 0 16px;
+}
+.about-logo { width: 52px; height: 52px; border-radius: 14px; overflow: hidden; flex: none; }
+.about-logo img { width: 100%; height: 100%; object-fit: cover; }
+.about-meta { display: flex; flex-direction: column; gap: 4px; }
+.about-name { font-size: calc(15px * var(--fsk)); font-weight: 600; color: rgba(var(--fg), 0.92); }
+.about-ver { font-size: calc(12px * var(--fsk)); color: var(--dim); }
+.about-ver b { color: rgba(var(--amber-2), 0.9); font-weight: 500; }
+.about-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 16px;
+}
+.about-cell {
+  padding: 10px 12px; background: rgba(var(--hl), 0.03); border-radius: 10px;
+  border: 1px solid rgba(var(--line), 0.4);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.about-cell b { font-size: calc(12.5px * var(--fsk)); color: var(--amber-2); font-weight: 500; }
+.about-cell span { font-size: calc(12px * var(--fsk)); color: var(--dim-2); line-height: 1.5; }
+.about-foot {
+  text-align: center; font-size: calc(11px * var(--fsk)); color: var(--dim-2);
+  margin-top: 16px; padding-top: 10px; border-top: 1px dashed rgba(var(--line), 0.4);
+  line-height: 1.7;
+}
+.about-foot a { color: var(--amber-2); text-decoration: none; }
+.about-foot a:hover { text-decoration: underline; }
+
+/* ── 浮层（万年历 / 天气） ── */
+.layer {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(460px, calc(100% - 40px)); max-height: calc(100% - 60px);
+  display: flex; flex-direction: column;
+  /* 底色 = 主题底色（深浅各一套 --sheet）+ 一层极淡的季节色：
+     秋季偏暖金、夏季偏青、冬季偏霜蓝，弹窗就不会跟页面各走各的色调。
+     季节层只有 4~6% 不透明度，压不暗文字（实测正文对比度仍 >12:1）。 */
+  background:
+    linear-gradient(162deg, rgba(var(--s1), 0.055) 0%, rgba(var(--s2), 0.042) 52%, rgba(var(--s3), 0.05) 100%),
+    var(--sheet);
+  border: 1px solid var(--line); border-radius: 18px;
+  backdrop-filter: blur(22px); box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+  z-index: 20; overflow: hidden; animation: pop .2s ease-out;
+}
+/* 浅色主题下 0.55 的黑影太重，像弹窗压在纸上；换成暖灰、分层更轻的投影 */
+.screen[data-theme=light] .layer {
+  box-shadow: 0 20px 54px rgba(66, 55, 36, 0.17), 0 3px 10px rgba(66, 55, 36, 0.07);
+}
+@keyframes pop { from { opacity: 0; transform: translate(-50%, -48%) scale(.98); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+.layer-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--line-soft); }
+.layer-head b { font-size: calc(14px * var(--fsk)); font-weight: 500; display: block; }
+.layer-head span { font-size: calc(11.5px * var(--fsk)); color: var(--dim); display: block; margin-top: 3px; }
+.layer-body { padding: 14px 18px 18px; overflow-y: auto; }
+/* 设置弹窗里复用说明页的排版，但滚动交给 .layer-body 自己，别叠两层滚动条 */
+.layer-body .set-body { overflow: visible; max-width: none; }
+.layer-body .set-body h3:first-child { margin-top: 0; }
+/* ── 设置面板并排布局：左栏导航 + 右栏内容 ── */
+.set-wrap { display: flex; gap: 18px; width: 100%; height: 100%; min-height: 0; }
+.set-nav {
+  display: flex; flex-direction: column; gap: 2px;
+  width: 128px; flex: none; position: sticky; top: 0; align-self: flex-start;
+  background: rgba(var(--hl), 0.035); border-radius: 10px; padding: 6px 4px;
+  max-height: 100%; overflow-y: auto;
+}
+.set-nav-btn {
+  text-align: left; padding: 8px 12px; border-radius: 8px; border: none;
+  background: transparent; color: rgba(var(--fg), 0.55); font-size: calc(12.5px * var(--fsk));
+  font-family: var(--font); cursor: pointer; transition: background .18s, color .18s, font-weight .18s;
+  position: relative;
+}
+.set-nav-btn:hover { background: rgba(var(--hl), 0.07); color: rgba(var(--fg), 0.85); }
+.set-nav-btn.on {
+  background: rgba(var(--amber-2), 0.18); color: var(--amber-2); font-weight: 600;
+}
+.set-nav-btn.on::before {
+  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 14px; border-radius: 2px; background: var(--amber-2);
+}
+.set-body-wrap {
+  flex: 1; min-width: 0; overflow-y: auto; max-height: calc(100vh - 180px);
+}
+.set-body-wrap::-webkit-scrollbar { width: 5px; }
+.set-body-wrap::-webkit-scrollbar-thumb { background: rgba(var(--fg), 0.18); border-radius: 3px; }
+.set-section { margin-bottom: 8px; }
+.set-section:last-child { margin-bottom: 0; }
+/* 概览 / 家电弹窗：内容比普通浮层宽，给两列卡片 */
+.layer.pop-wide { width: min(760px, calc(100% - 40px)); }
+.layer-body .cards.layer-cards {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  width: 100%; max-width: none; margin: 0; padding: 0; flex: none; overflow: visible;
+}
+/* 家电卡行数差得远（晾衣架 2 行 vs 热水器 6 行），默认 stretch 会把矮的那张拉高、
+   底下空一大片 → 各自按内容高度排 */
+#applianceCards { align-items: start; }
+
+.cal-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.cal-top b { font-size: calc(17px * var(--fsk)); font-weight: 400; letter-spacing: .5px; }
+.cal-nav { display: flex; gap: 4px; }
+.cal-nav button {
+  width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line-soft);
+  background: none; color: var(--dim); cursor: pointer; font-family: inherit; font-size: calc(13px * var(--fsk)); display: grid; place-items: center;
+}
+.cal-nav button:hover { color: var(--text); background: rgba(var(--hl), 0.06); }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.cal-wd { text-align: center; font-size: calc(10.5px * var(--fsk)); color: var(--dim-2); padding: 4px 0 6px; letter-spacing: .5px; }
+.cal-cell {
+  aspect-ratio: 1 / 1; border-radius: 9px; border: 1px solid transparent;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  font-size: calc(13px * var(--fsk)); color: rgba(var(--fg), 0.82); cursor: pointer; background: none;
+  font-family: inherit; padding: 0;
+}
+.cal-cell:hover { background: rgba(var(--hl), 0.06); }
+.cal-cell.empty { visibility: hidden; }
+.cal-cell i { font-style: normal; font-size: calc(9.5px * var(--fsk)); color: rgba(var(--fg),.42); }
+.cal-cell.today { border-color: rgba(var(--am), 0.55); color: var(--amber-2); }
+.cal-cell.today i { color: rgba(var(--am), 0.75); }
+.cal-cell.sel { background: var(--amber-soft); border-color: rgba(var(--am), 0.4); }
+.cal-foot { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); font-size: calc(12px * var(--fsk)); color: var(--dim); line-height: 1.8; }
+.cal-foot b { color: var(--amber-2); font-weight: 500; }
+
+.we-now { display: flex; align-items: baseline; gap: 10px; padding: 2px 0 10px; }
+.we-now b { font-size: calc(44px * var(--fsk)); font-weight: 300; letter-spacing: 1px; }
+.we-now b i { font-size: calc(20px * var(--fsk)); font-style: normal; color: var(--dim-2); }
+.we-now span { font-size: calc(13px * var(--fsk)); color: var(--dim); }
+.we-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.we-tags span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: 9px; border: 1px solid var(--line-soft); background: var(--panel-2); font-size: calc(12px * var(--fsk)); color: var(--text); }
+.we-tags i { font-style: normal; font-size: calc(11px * var(--fsk)); color: var(--dim-2); }
+.we-sec { margin: 16px 0 8px; font-size: calc(12px * var(--fsk)); color: var(--dim); letter-spacing: .4px; }
+.we-note { margin-top: 14px; font-size: calc(11px * var(--fsk)); line-height: 1.75; color: var(--dim-2); }
+.we-hours {
+  display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px;
+  scrollbar-width: thin; scrollbar-color: rgba(var(--fg), 0.18) transparent;
+  overscroll-behavior-x: contain;
+}
+/* 横向滚动条：改细、半透明，跟页面其它滚动条一致；不写就会用系统默认的白条 */
+.we-hours::-webkit-scrollbar { height: 3px; }
+.we-hours::-webkit-scrollbar-track { background: transparent; }
+.we-hours::-webkit-scrollbar-thumb { background: rgba(var(--fg), 0.18); border-radius: 3px; }
+.we-hours:hover::-webkit-scrollbar-thumb { background: rgba(var(--fg), 0.3); }
+/* 弹窗里的纵向滚动区同样处理，避免深色下出现系统白条 */
+.layer-body, .about-body {
+  scrollbar-width: thin; scrollbar-color: rgba(var(--fg), 0.18) transparent;
+}
+.layer-body::-webkit-scrollbar, .about-body::-webkit-scrollbar { width: 4px; }
+.layer-body::-webkit-scrollbar-track, .about-body::-webkit-scrollbar-track { background: transparent; }
+.layer-body::-webkit-scrollbar-thumb, .about-body::-webkit-scrollbar-thumb {
+  background: rgba(var(--fg), 0.18); border-radius: 4px;
+}
+.we-hour { flex: none; width: 54px; text-align: center; font-size: calc(11px * var(--fsk)); color: var(--dim); }
+.we-hour b { display: block; font-size: calc(13px * var(--fsk)); color: var(--text); margin: 5px 0 2px; font-weight: 400; }
+.we-hour em { display: block; font-style: normal; font-size: calc(10px * var(--fsk)); color: var(--dim-2); min-height: 14px; }
+.we-hour.sun b { color: var(--amber-2); }
+.we-hour.sun svg { width: 18px; height: 18px; color: var(--amber); margin: 4px 0 2px; }
+.we-hour .bar { width: 100%; height: 44px; border-radius: 6px; background: linear-gradient(180deg, rgba(var(--am), 0.16), rgba(var(--am), 0.03)); margin-bottom: 5px; }
+.we-empty { font-size: calc(12px * var(--fsk)); color: var(--dim-2); line-height: 1.8; padding: 6px 0 2px; }
+.we-days { display: flex; flex-direction: column; gap: 2px; }
+.we-day { display: grid; grid-template-columns: 88px 1fr 46px 40px; align-items: center; gap: 6px; padding: 8px 6px; border-radius: 10px; font-size: calc(12.5px * var(--fsk)); }
+.we-day:nth-child(odd) { background: rgba(var(--hl), 0.03); }
+.we-day span { color: var(--dim); }
+.we-day em { font-style: normal; font-size: calc(11.5px * var(--fsk)); color: var(--dim-2); }
+.we-day b { text-align: right; font-weight: 400; color: var(--text); }
+.we-day i { font-style: normal; text-align: right; color: var(--dim-2); }
+.cal-nav select { font-family: var(--font); font-size: calc(12px * var(--fsk)); color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 3px 4px; }
+.cal-cell.term { border-color: rgba(var(--am), 0.4); }
+.cal-cell.term i { color: var(--amber); }
+.cal-term { color: var(--amber-2); }
+.cal-foot span { display: inline-block; margin-right: 12px; }
+.cal-yj { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: calc(12px * var(--fsk)); color: var(--dim); }
+.cal-yj em { font-style: normal; font-size: calc(10.5px * var(--fsk)); padding: 2px 6px; border-radius: 6px; background: var(--amber-soft); color: var(--amber-2); }
+.cal-yj em:last-of-type { background: rgba(226, 75, 74, 0.14); color: #f09595; }
+.cal-note { margin-top: 8px; font-size: calc(11px * var(--fsk)); line-height: 1.75; color: var(--dim-2); }
+
+/* 顶部提示条：底色是写死的深色药丸，所以文字/描边也要写死为亮色。
+   不要用 var(--fg) —— 浅色主题下 --fg 是深灰，会变成深灰字压深底（「主题 · 跟随日出日落」直接看不见） */
+.toast {
+  position: absolute; left: 50%; bottom: 86px; transform: translateX(-50%);
+  padding: 9px 18px; border-radius: 999px; font-size: calc(12.5px * var(--fsk));
+  background: rgba(26, 31, 41, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.95); z-index: 30; white-space: nowrap;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  animation: toastin .2s ease-out;
+}
+.screen[data-theme=light] .toast {
+  /* 浅底户型图上再压一层浅描边会更清楚边界，但文字保持白 */
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 10px 30px rgba(20, 24, 32, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+@keyframes toastin { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+.standby {
+  position: absolute; inset: 0; z-index: 40;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  background: radial-gradient(700px 500px at 50% 60%, rgba(var(--am), 0.08), transparent 70%), rgba(6, 8, 12, 1);
+  cursor: pointer;
+}
+/* 屏保底永远是近黑的深色（不跟深浅主题走），所以文字必须写死浅色。
+   以前这里继承 var(--text)/var(--dim)：浅色主题下会变成 #23262c 深灰压在黑底上，
+   整屏只剩一团灰影，看不清。文字颜色不再引用主题变量。 */
+/* 屏保时间同样是七段数码管。字号只当高度尺，height:1em 定住整块高度；
+   原来的 text-shadow 换成 svg 上的 filter（字变图形后阴影不再跟着字形走） */
+.standby time {
+  /* 屏保是整屏，时间要撑满：下限 104（小窗口也够看），上限 152（1440 宽时约 11vw）。
+     换成 DSEG 真字形后字高就是 1em（原来 1.16 是给普通字体的 85% 字形高度做补偿的） */
+  display: block; height: 1em; margin-bottom: 10px;
+  font-size: clamp(calc(104px * var(--fsk)), 11.5vw, calc(152px * var(--fsk))); font-weight: 200;
+  letter-spacing: 4px; line-height: 1;
+  color: #ffffff;
+}
+.standby time svg {
+  display: block; height: 100%; width: auto;
+  filter: drop-shadow(0 2px 30px rgba(255, 255, 255, 0.16));
+}
+.standby .sb-date { font-size: calc(16px * var(--fsk)); color: rgba(255, 255, 255, 0.94); letter-spacing: 1.5px; }
+.standby .sb-lunar { font-size: calc(13px * var(--fsk)); color: #f3dcb0; }
+.standby .sb-hint { position: absolute; bottom: 46px; font-size: calc(11.5px * var(--fsk)); color: rgba(255, 255, 255, 0.66); letter-spacing: 1px; }
+
+/* 底部署名压在氛围图上，加一层胶囊底保证任何背景下都读得清 */
+/* 左下角一条：品牌 + 数据状态 + 两个图标入口（待机屏保 / 外观设置）。
+   齿轮从右上角搬到这里；底部筛选条居中后，左下这段可用宽度约 190px，所以入口只放图标。
+   <1150 时整条让位（底部一条几乎铺满），外观设置由右上角 .only-narrow 的齿轮接管 */
+.footer-note {
+  /* 宽度 = 左栏（.stage 第一列 185px），left 也跟左栏一样从 10 起，两条上下完全对齐。
+     以前 left:18 / 宽度自由，右边缘比左栏探出 29px，看着歪。
+     z-index 要高过 .filters（9）：筛选条左移 75px 后左端伸到 153，会压住这条右边的锁按钮
+     （那块正好是筛选条的左内边距，没有 chip，压上去也不挡内容）。 */
+  /* 比 .filters(20) 高 2px：两条底边的关系保持原样 */
+  position: absolute; left: 10px; bottom: 18px; z-index: 10;
+  width: var(--sidew, 185px); box-sizing: border-box; justify-content: center;
+  display: flex; gap: 4px; align-items: center;
+  padding: 4px 3px 4px 7px; border-radius: 999px;
+  background: var(--panel-soft); border: 1px solid var(--line-soft);
+  backdrop-filter: blur(8px);
+  font-size: calc(10px * var(--fsk)); color: var(--dim); letter-spacing: .3px;
+  white-space: nowrap;
+}
+/* 185 宽里要挤下「LoveHome · 实时 + 两个 24 键」，所以品牌字距收紧、竖分隔槽去掉 */
+.footer-note .fn-brand { color: rgba(var(--am), 0.82); letter-spacing: .6px; text-transform: uppercase; }
+.footer-note .fn-dot { font-style: normal; opacity: .8; }
+.footer-note .fn-sep { display: none; }
+/* 入口按钮与右上角 .lt-btn 同一尺寸（24px 方块），一眼是同一套控件 */
+.fn-btn {
+  display: grid; place-items: center;
+  width: 24px; height: 24px; padding: 0; border-radius: 8px; cursor: pointer;
+  border: 1px solid transparent; background: rgba(var(--fg), 0.06);
+  color: var(--dim);
+  transition: color .18s, background .18s, border-color .18s;
+}
+/* 14px：齿轮（实心带齿）在 13px 时齿会糊成一坨，比锁略大一点也更平衡 */
+.fn-btn svg { width: 14px; height: 14px; }
+/* 三段之间的间隙统一 11px（= 整条 4px 的 gap + 这里补 7）：「LOVEHOME · 实时」→ 齿轮 → 锁。
+   整条 gap 是 4，品牌和那两个 span 之间也吃它；只有这两处补到 11，文字块内部才不会散开。
+   按钮各自带一层浅底，间隙太小两块底色会连成一片，看不出是两个独立按钮。 */
+.footer-note #fnSet { margin-left: 7px; }
+.footer-note #fnIdle { margin-left: 7px; }
+.fn-btn:hover { color: var(--text); background: rgba(var(--fg), 0.12); border-color: rgba(var(--fg), 0.2); }
+/* 设置弹窗开着时点亮，和原来右上角齿轮的反馈保持一致 */
+.fn-btn.on { color: var(--amber-2); background: var(--amber-soft); border-color: rgba(var(--am), 0.45); }
+.fn-btn.on:hover { color: var(--amber-2); border-color: rgba(var(--am), 0.6); }
+
+/* ── 窄屏 / 中控台 ── */
+/* 底部一条合并后约 830 宽：窗口不够时先让页脚让位，再收窄每个 chip（顺序不能反） */
+@media (max-width: 1150px) {
+  /* 底部一条几乎铺满，左下角这条让位；外观设置改由右上角那个 .only-narrow 齿轮提供，
+     布局排因此回到 6 个（174），.hide-top 里四季排的 right 也要跟着回到 204 */
+  .footer-note { display: none; }
+  .lt-btn.only-narrow { display: grid; }
+  .screen.hide-top .season-toggles { right: 204px; }
+}
+@media (max-width: 1060px) {
+  .filters { gap: 6px; }
+  .fgroup { gap: 6px; }
+  .filter { padding: 7px 10px; font-size: calc(12px * var(--fsk)); gap: 5px; }
+  .filter svg { width: 13px; height: 13px; }
+}
+@media (max-width: 1180px) {
+  /* 收窄时右留白不能跟着缩到 18：右上角两排按钮是绝对定位的，会让天气卡钻到按钮底下 */
+  .topbar { padding: 16px 206px 0 18px; grid-template-columns: minmax(150px, auto) 1fr minmax(130px, auto); gap: 12px; }
+  /* 这条断点 --rpw 收到 320、侧距 14：按对齐公式天气只剩 128px，描述行放不下，
+     所以窄屏不追求「与右栏同起点」，宽度交回内容（第三列 minmax(130px,auto)）。
+     margin-top 4 是因为这一档 .topbar 内距收到 16：16 + 4 = 20，仍与右上角按钮排同一条顶线 */
+  .weather { width: auto; min-width: 130px; margin-top: 4px; }
+  .pill { padding: 8px 12px; font-size: calc(12px * var(--fsk)); }
+  /* 1180 档整条隐藏家人 chip：这一档顶栏本来就在换行（工具条自己都放不下），
+     再加 3 个 chip 会顶到 178px 高、压住 .stage 顶部（768 实测：顶栏内容到 178，
+     而 stage padding-top 只有 96）→ 小屏不添乱，三人状态去「家中概览」卡看，
+     那张卡一直都在。要在这个尺寸也常驻，得先给顶栏让出竖向空间，别硬塞。 */
+  .people-bar { display: none; }
+  .stage { --rpw: 320px; grid-template-columns: 152px minmax(0, 1fr) var(--rpw); gap: 10px; padding: 92px 14px 68px; }
+  /* 左栏缩到 152 时这条要跟着同宽；152 放不下「· 实时」，窄屏只留品牌 + 两个入口 */
+  .footer-note { left: 14px; width: 152px; }
+  .footer-note .fn-dot, .footer-note .fn-src { display: none; }
+  .side-block { padding: 10px 9px; }
+  .side-room { font-size: calc(11.5px * var(--fsk)); padding: 5px var(--srail); }
+}
+@media (max-width: 1000px) {
+  .stage { --rpw: 320px; grid-template-columns: minmax(0, 1fr) var(--rpw); padding: 96px 14px 70px; }
+  .side { display: none; }
+  /* 左栏收起后只剩两列：两块面板改占第 2 列（否则会被上面那句 grid-column:3 推到隐式列） */
+  .room-panel, .alt-panel { grid-column: 2; }
+}
+@media (max-width: 900px) {
+  /* 再窄就没地方让了：左移 75 会把条子顶到左边缘，回正居中 */
+  .filters { transform: translateX(-50%); }
+  .scenes { justify-content: flex-start; }
+  .pill span { display: none; }
+  .pill { padding: 9px 11px; }
+  .metrics .m:nth-child(3) { display: none; }
+  .card.wide { grid-column: span 1; }
+
+  /* ── v221：这一档不要「常用设备 · 安防」常驻栏 ──
+     左栏 ≤1000 已经收起，右栏再咬住 320 的话：768 实测户型只剩 422、960 剩 614，
+     户型上的设备图标挤在一起点不准，常驻栏还跟它抢宽度。
+     所以窄屏把常驻栏整块撤掉，设备一律「点户型图图标 → 操作浮层」
+     （tapDevice 从来就是这个行为，交互不用改）；常驻栏里的内容没丢：
+     房间面板有整间清单，概览卡有家人 / 安防，设置里那排开关在宽屏仍然有效。
+     ⚠️ 用 id 选择器压掉 `.alt-panel { display: flex }`（同 0,1,0，但 id 权重更大），
+        别在这儿写 !important —— [hidden] 那条 200 行的规则才是唯一的强制收起入口。 */
+  #altPanel { display: none; }
+  /* 天气卡同一档收掉：721~900 它虽然没压到户型，但被夹在情景图标和右上角按钮中间
+     （768 实测只剩 130 宽，「天气实体未配置」整行糊在一起），手机上（≤720）更是直接
+     掉到第二行压住户型顶部虚线。这一档整块隐藏，功能区让给情景 + 设备。
+     天气详情（点卡片开的那个浮层）在 ≥901 仍然原样。 */
+  .weather { display: none; }
+  /* display:block：房间面板是 absolute，留在 grid 里会被算进「第 2 列」那块网格区域，
+     left/right 会相对那个 0 宽的区域解算，抽屉宽度直接塌掉。
+     撤列之后户型也顺势吃满整幅（768 从 422 → 740），不用再算 padding。 */
+  .stage { display: block; }
+  /* 房间面板改成和手机同一套底部抽屉：不占列 → 开合不再让户型横移 */
+  .room-panel { position: absolute; left: 14px; right: 14px; bottom: 86px; height: auto; max-height: 56%; width: auto; }
+  .room-panel.wide { width: auto; }
+}
+@media (max-width: 720px) {
+  .topbar { grid-template-columns: 1fr auto; }
+  .scenes { display: none; }
+  /* 情景条整体收起时，家人 chip 也没地方挂（概览卡里还有完整三人状态） */
+  .people-bar { display: none; }
+  .stage { padding: 88px 10px 78px; }
+  .stage { display: block; padding: 96px 12px 70px; }
+  /* 手机宽度下改成底部抽屉：铺满左右，不再靠列宽占位。
+     左右 12→16：12px 在 380~430 宽的竖屏上看着还是贴着边（右边还有条滚动条） */
+  .room-panel { position: absolute; left: 16px; right: 16px; bottom: 72px; height: auto; max-height: 52%; width: auto; }
+  .room-panel.wide { width: auto; }
+  .alt-panel { position: absolute; left: 16px; right: 16px; bottom: 72px; height: auto; max-height: 52%; width: auto; }
+  .rp-body.two { grid-template-columns: 1fr; }
+  /* v223：手机上的弹窗（概览 / 手表）只有 ~390 宽，两列卡片每张不到 190，
+     .ci-r 的 86px 标签列会把值挤成竖条 → 整块改单列，标签列也收一档 */
+  .layer-body .cards.layer-cards { grid-template-columns: 1fr; }
+  .ctl-info .ci-r { grid-template-columns: 74px minmax(0, 1fr); }
+  /* 实体清单在单列弹窗里能宽一点，不然「电池 · 开始充电」又得折行。
+     多带一层 .layer-body：这条规则写在源文件里比下面那条 118px 早，
+     靠选择器权重压过它，不依赖顺序 */
+  .layer-body .ctl-info .ci-r.ent { grid-template-columns: 100px minmax(0, 1fr); }
+  .filters { bottom: 12px; gap: 2px; }
+  .filter { padding: 7px 9px; }
+  .calendar-trigger { display: none; }
+}
+
+/* ── 设备控制浮层 ── */
+.ctl { width: 100%; max-width: 430px; margin: 0 auto; }
+.ctl-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.ctl-ico { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: var(--amber-soft); border: 1px solid rgba(var(--am), 0.28); }
+.ctl-ico svg { width: 22px; height: 22px; color: var(--amber); }
+.ctl-head b { display: block; font-size: calc(14px * var(--fsk)); font-weight: 500; }
+.ctl-head span { font-size: calc(12px * var(--fsk)); color: var(--dim-2); }
+.ctl-temp { display: flex; align-items: center; justify-content: center; gap: 26px; padding: 12px 0 16px; }
+.ctl-temp .round { width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: calc(21px * var(--fsk)); line-height: 1; cursor: pointer; font-family: var(--font); }
+.ctl-temp .round:active { background: var(--amber-soft); color: var(--amber-2); }
+.ctl-temp .tt { text-align: center; }
+.ctl-temp .tt b { font-size: calc(40px * var(--fsk)); font-weight: 300; letter-spacing: 1px; }
+.ctl-temp .tt b i { font-size: calc(20px * var(--fsk)); font-style: normal; color: var(--dim-2); }
+.ctl-temp .tt span { display: block; margin-top: 2px; font-size: calc(11.5px * var(--fsk)); color: var(--dim-2); }
+.ctl-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.ctl-row button { flex: 1 1 auto; min-width: 62px; padding: 9px 10px; font-size: calc(12.5px * var(--fsk)); border-radius: 11px; border: 1px solid var(--line); background: var(--panel-2); color: var(--dim); cursor: pointer; font-family: var(--font); }
+.ctl-row button.on { background: var(--amber-soft); border-color: rgba(var(--am), 0.45); color: var(--amber-2); }
+/* 次一级的选项行（风速 / 预设 / 音源）：比主行小一档，避免两排看起来同样重要 */
+.ctl-row.sub { margin-bottom: 10px; }
+.ctl-row.sub button { min-width: 50px; padding: 7px 8px; font-size: calc(11.5px * var(--fsk)); border-radius: 9px; }
+.ctl-row.sub + .ctl-row.sub { margin-top: -4px; }
+.ctl-slide { display: flex; align-items: center; gap: 12px; padding: 10px 2px 12px; font-size: calc(12.5px * var(--fsk)); color: var(--dim); }
+/* 标签可能 2~4 个汉字（开度 / 升降位置 / 目标湿度），别让它折行 */
+.ctl-slide > span { width: auto; min-width: 32px; flex: none; white-space: nowrap; }
+.ctl-slide > b { width: 44px; flex: none; text-align: right; font-weight: 400; color: var(--amber-2); }
+.ctl-slide input[type=range] { flex: 1; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 4px; background: rgba(var(--fg), 0.16); outline: none; }
+.ctl-slide input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--amber); border: none; cursor: pointer; }
+.ctl-slide input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--amber); border: none; cursor: pointer; }
+.ctl-foot { margin-top: 12px; }
+.ctl-foot .wide { width: 100%; padding: 12px; font-size: calc(13px * var(--fsk)); border-radius: 13px; border: 1px solid rgba(var(--am), 0.3); background: var(--amber-soft); color: var(--amber-2); cursor: pointer; font-family: var(--font); }
+.ctl-note { margin-top: 12px; font-size: calc(11px * var(--fsk)); line-height: 1.75; color: var(--dim-2); }
+.ctl-foot .wide:disabled { opacity: .5; cursor: not-allowed; background: var(--panel-2); color: var(--dim); border-color: var(--line); }
+
+/* ── 复合设备弹窗：一枚图标 + 一个弹窗装下整台设备（中控面板 / 门铃 / 门锁） ── */
+.layer.wide { width: min(520px, calc(100% - 32px)); max-height: calc(100% - 26px); }
+.ctl-comp { max-width: none; }
+.ctl-comp .ctl-head { margin-bottom: 10px; }
+.cgrp { border-top: 1px solid var(--line-soft); padding: 8px 0 2px; }
+.cgrp:first-of-type { border-top: 0; padding-top: 0; }
+.cgrp-t { font-size: calc(11px * var(--fsk)); letter-spacing: .6px; color: var(--dim-2); margin-bottom: 2px; }
+.cgrp-h { font-size: calc(10.5px * var(--fsk)); line-height: 1.65; color: var(--dim-2); margin: 0 0 4px; }
+.crow { display: flex; align-items: center; gap: 10px; min-height: 31px; font-size: calc(12.5px * var(--fsk)); color: var(--dim); }
+.crow .clab { flex: 0 0 auto; min-width: 0; white-space: nowrap; overflow: visible; text-overflow: clip; padding-right: 6px; }
+.crow .csw, .crow .cseg { flex: 1 1 auto; min-width: 0; }
+.crow.ro .cval { font-weight: 400; color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
+.crow.ro .cval.dead { color: var(--dim-2); }
+.cseg {
+  display: flex; flex: none; border: 1px solid var(--line); border-radius: 9px;
+  overflow: hidden; background: var(--panel-2);
+}
+.cseg button {
+  padding: 5px 9px; font-size: calc(11.5px * var(--fsk)); border: 0; background: none; color: var(--dim);
+  cursor: pointer; font-family: var(--font); white-space: nowrap; flex: none;
+}
+.cseg button + button { border-left: 1px solid var(--line-soft); }
+.cseg button.on { background: var(--amber-soft); color: var(--amber-2); }
+.cseg button:disabled { opacity: .45; cursor: not-allowed; }
+.cseg.sm button { padding: 4px 7px; font-size: calc(11px * var(--fsk)); }
+.csel {
+  flex: none; max-width: 56%; padding: 5px 8px; font-size: calc(11.5px * var(--fsk)); border-radius: 9px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-family: var(--font);
+}
+.csw {
+  width: 40px; height: 23px; border-radius: 999px; border: 1px solid var(--line);
+  background: rgba(var(--fg), 0.09); position: relative; cursor: pointer; flex: none; padding: 0;
+  transition: background .2s, border-color .2s;
+}
+.csw i {
+  position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%;
+  background: rgba(var(--fg), 0.62); transition: transform .2s, background .2s;
+}
+.csw.on { background: rgba(var(--am), 0.85); border-color: rgba(var(--am), 0.9); }
+.csw.on i { transform: translateX(17px); background: #241c11; }
+.csw:disabled, .cbtn:disabled { opacity: .45; cursor: not-allowed; }
+.cbtn {
+  flex: none; padding: 5px 11px; font-size: calc(11.5px * var(--fsk)); border-radius: 9px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--dim);
+  cursor: pointer; font-family: var(--font); white-space: nowrap;
+}
+.cbtn:hover { color: var(--text); background: rgba(var(--fg), 0.07); }
+.crng {
+  flex: 1 1 auto; min-width: 0; -webkit-appearance: none; appearance: none;
+  height: 4px; border-radius: 4px; background: rgba(var(--fg), 0.16); outline: none;
+}
+.crng::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); border: 0; cursor: pointer; }
+.crng::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: var(--amber); border: 0; cursor: pointer; }
+.cnum { flex: none; width: 48px; text-align: right; font-weight: 400; font-size: calc(12px * var(--fsk)); color: var(--amber-2); }
+.ctext {
+  flex: 1 1 auto; min-width: 0; padding: 6px 10px; font-size: calc(12px * var(--fsk)); border-radius: 9px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-family: var(--font);
+}
+.ctext::placeholder { color: var(--dim-2); }
+
+/* 弹窗底部的实体信息：核对设备到底挂到哪个实体 */
+.ctl-info { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.ctl-info .ci-h {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 0 0 2px; border: 0; background: none; cursor: pointer; text-align: left;
+  font-family: inherit; font-size: calc(10.5px * var(--fsk)); letter-spacing: 1.4px; color: var(--dim-2);
+}
+.ctl-info .ci-h i { font-style: normal; font-size: calc(9px * var(--fsk)); opacity: .85; transition: transform .18s; }
+.ctl-info .ci-h.open i { transform: rotate(180deg); }
+.ctl-info .ci-h:hover { color: var(--text); }
+.ctl-info .ci-b { display: grid; gap: 4px; margin-top: 8px; }
+.ctl-info .ci-r { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 10px; align-items: baseline; font-size: calc(11.5px * var(--fsk)); }
+.ctl-info .ci-r > span { color: var(--dim); }
+/* v225：标签是 IP（一整串点分数字）时 86px 放不下，会折成两行、右边状态被挤到中间。
+   宽 108 刚好一行放下 13 位数字 + 点，不换行 */
+.ctl-info .ci-r.ip { grid-template-columns: 108px minmax(0, 1fr); }
+.ctl-info .ci-r.ip > span { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 实体清单（「电池 · 开始充电」这类 8~10 字标签）：86px 只放得下 7 个汉字，
+   会折成三行把值挤到中间 → 放到 118，一行放下 */
+.ctl-info .ci-r.ent { grid-template-columns: 118px minmax(0, 1fr); }
+.ctl-info .ci-r > b { font-weight: 400; color: var(--text); word-break: break-all; line-height: 1.6; }
+.screen[data-theme=light] .ctl-info .ci-r > span { color: rgba(var(--fg), 0.78); }
+
+/* ── 左栏 / 顶栏折叠（右上角按钮常驻，隐藏后仍可点回来） ── */
+.side { min-width: 0; transition: opacity .3s ease, transform .3s ease; }
+.screen.hide-top .topbar { opacity: 0; transform: translateY(-14px); pointer-events: none; }
+.screen.hide-top .stage { padding-top: 56px; }
+/* 顶栏收起后不占户型图：整排横向接到布局按钮左边（此时天气也隐藏了，不会撞）
+   right = 24（布局排右距） + 144（布局排宽） + 6（间隙）；布局排 5 个、四季排 7 个（v235），
+   这里只跟布局排有关 */
+/* 隐藏顶栏时四季排挪到第一排左侧：right = 24 + 第一排宽度 144（5 个，去掉了齿轮） + gap 6 */
+.screen.hide-top .season-toggles { top: 20px; right: 174px; opacity: .78; }
+.screen.hide-top .season-toggles:hover { opacity: 1; }
+.screen.hide-side .stage { grid-template-columns: 0 minmax(0, 1fr) var(--rpw, 384px); }
+.screen.hide-side .side { opacity: 0; transform: translateX(-14px); pointer-events: none; overflow: hidden; }
+
+/* ── 底栏自适应（v194）──────────────────────────────────────────
+   底栏这一行同时住着三块：左下品牌条（.footer-note）、底部筛选条（.filters）、
+   右下四季胶囊（.season-toggles）。三块都是绝对定位、各按各的规则摆，
+   所以只有屏幕够宽才恰好不打架，窄一点就互相盖：
+     1184 宽实测（v193）：品牌条 10~240 压住「首页」，四季胶囊 877~1083 压住「其它」；
+     1024/980 宽：胶囊照样压住筛选条右端（胶囊只有 right，没有任何一处给它留位）。
+   v194 的原则：
+     ① 筛选条**不动**（底部这条位置用户明确说过不要改），居中/偏移规则原样保留；
+     ② 谁让位：先把品牌条收成两个图标（1151~1389），再把 chip 内距收一档
+        （1061~1240，14→12，整条 728→692）；还挤就**把四季胶囊隐藏**（≤1111）；
+     ③ 胶囊藏掉后底部少一行，原来给它留的 131/121 padding 同步收回 82/84，
+        面板与抽屉跟着下移，不留一条空带。
+   ⚠️ 下面每条阈值都是按实测宽度算的，改 chip 内距/字号、改品牌条宽度、改 --rpw
+      都要重算（算式写在每条上面）。 */
+
+/* 品牌条：1151~1389 只留「设置 + 待机」两个 24 图标（约 76 宽）。
+   算式：筛选条左边缘 = 0.5W − 75 − 半宽，品牌条右边缘 = 10 + 宽度，中间至少留 8：
+     692 宽 → 0.5W − 421 − 8 ≥ 10 + 宽度 → W=1151 时 宽度 ≤ 136；
+     230 宽 → 需要 W ≥ 1390（所以 ≥1390 才恢复「LOVEHOME · 实时」）。 */
+@media (min-width: 1151px) and (max-width: 1389px) {
+  .footer-note { width: auto; padding: 4px; gap: 4px; }
+  .footer-note .fn-brand, .footer-note .fn-dot, .footer-note .fn-src { display: none; }
+  .footer-note #fnSet { margin-left: 0; }
+  .footer-note #fnIdle { margin-left: 4px; }
+}
+
+/* chip 内距 14→11（948→912 的一半：整条 748→694，省 54px）。
+   748 宽时筛选条右端 = 0.5W + 299、胶囊左端 = W − 307，要留 8 → W ≥ 1228；
+   694 宽时右端 0.5W + 272、左端 W − 277 → W ≥ 1114，所以 1120 以上都能容下胶囊。
+   1061~1240 这段还得跟左侧品牌条一起塞，先收这一档再说。 */
+@media (min-width: 1061px) and (max-width: 1240px) {
+  .filter { padding: 7px 11px; }
+}
+
+/* 四季胶囊：放不下就整块隐藏（用户要求「分辨率太小或屏幕太小就隐藏」）。
+   v235 加了第 7 个按钮（现实风）：胶囊 = 7×24 + 6×6(gap) + 2×8(内距) = 220，半宽 110，
+   胶囊左端 = W − 204 − 110 = W − 314。筛选条右端 0.5W + 272（chip 内距 11 的 694 档），
+   要留 8 → W ≥ 1188；内距 14 的 748 档 → W ≥ 1242（该档本来就 ≥1241，只有 1px 边缘）。
+   取 1188 兜住取整误差。
+   功能不丢：外观设置里还有完整一排（主题 / 四季配色）。 */
+@media (max-width: 1187px) {
+  .season-toggles { display: none; }
+}
+
+/* ≤900：胶囊隐藏后底部不用再让 131/121 一整条，收回到「筛选条 + 8」的量。
+   ≤720 筛选条 bottom 12、高 46 → 顶边 58，抽屉底 86 留 14px。 */
+@media (max-width: 900px) {
+  .stage { padding-bottom: 82px; }
+  .alt-panel, .room-panel { bottom: 86px; }
+}
+@media (max-width: 720px) {
+  .stage { padding-bottom: 84px; }
+}
+
+/* 手机：先把图层 chip 收成纯图标（≤660），再把页面 tab 也收成纯图标（≤520）。
+   名字写进 title，长按/悬停能看到。
+   带字时整条 621 宽（box = W − 24），所以 660 以下必须收；收完 449。
+   ≤420 再收一档内距（9→7），整条 326 —— 360 的窄屏（可用 336）也能一次放下，
+   不用横向滚动（滚动是最后兜底，不藏 scrollbar 谁都发现不了）。 */
+@media (max-width: 660px) {
+  #filterChips .filter { padding: 7px 9px; gap: 0; }
+  #filterChips .filter span { display: none; }
+}
+@media (max-width: 520px) {
+  #pageTabs .filter { padding: 7px 9px; gap: 0; }
+  #pageTabs .filter span { display: none; }
+}
+@media (max-width: 420px) {
+  #filterChips .filter, #pageTabs .filter { padding: 6px 7px; }
+}
+
+/* ── 常规 / 宽屏（≥901，且 ≥1112 才有胶囊）：四季配色常驻右下角 ───
+   用户要求：「主题色按钮放在整体界面的右下角，在右侧边栏的下面」
+   + v189「增加一圈玻璃效果，和筛选条一样」「和右侧边栏居中对齐」。
+   玻璃那套（panel-soft / line-soft / blur12 / 圆角 999 / 轻投影）直接从 .filters 抄。
+   居中：right 取「右栏中心到屏幕右边的距离」= stage 右内距 + 右栏宽/2，
+   再 translateX(50%) 把右边缘回推半个自身宽度 → 胶囊中心 = 右栏中心。
+   ⚠️ --rpw 定义在 .stage 上，.season-toggles 是它的兄弟节点、继承不到，
+      所以下面两档的 204 / 174 是写死的，改 --rpw 或 stage 内距必须跟着重算：
+        >1180: 12 + 384/2 = 204     901~1180: 14 + 320/2 = 174
+   bottom 24：胶囊高 38（24 按钮 + 6×2 内距），占 24~62。
+   ⚠️ 这段必须写在 1409 行 `.screen.hide-top .season-toggles` 之后，否则会被拽回右上角。 */
+@media (min-width: 901px) {
+  .season-toggles {
+    top: auto; bottom: 24px; left: auto; right: 204px;
+    transform: translateX(50%);
+    width: fit-content; justify-content: center; gap: 6px;
+    padding: 6px 8px; border-radius: 999px;
+    background: var(--panel-soft); border: 1px solid var(--line-soft);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .05);
+  }
+  /* 隐藏顶栏时也留在右下角（这时它是页面上唯一的外观入口，别跟着顶栏一起没） */
+  .screen.hide-top .season-toggles {
+    top: auto; bottom: 24px; left: auto; right: 204px;
+    transform: translateX(50%); opacity: .92;
+  }
+}
+@media (min-width: 901px) and (max-width: 1180px) {
+  /* 这一档 --rpw 收到 320、stage 右内距 14 → 右栏中心距右边 174 */
+  .season-toggles, .screen.hide-top .season-toggles { right: 174px; }
+}
+
+/* ── 定时 / 倒计时卡（v192）─────────────────────────────────────
+   弹窗末尾自动追加的一张卡：米家把定时做在云端，HA 侧没有实体，
+   所以倒计时由页面自己跑（JS 的 tickTimers）。灯 / 插排 / 通断器 / 风扇 /
+   浴霸 / 空调全都带，样式跟 .cgrp 那套卡片语言一致（圆角 + 细描边 + 无大投影）。 */
+.timercard {
+  margin-top: 10px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--line-soft); background: var(--panel-2);
+}
+.timercard .tc-t {
+  font-size: calc(12px * var(--fsk)); color: var(--text); font-weight: 500;
+}
+.timercard .tc-h {
+  margin-top: 3px; font-size: calc(11px * var(--fsk)); color: var(--dim-2); line-height: 1.5;
+}
+.trun { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.trun .tseg, .trun .topt { display: inline-flex; gap: 3px; flex: 0 0 auto; }
+.trun button {
+  font-family: inherit; font-size: calc(11.5px * var(--fsk)); cursor: pointer;
+  padding: 4px 8px; border-radius: 8px;
+  background: none; border: 1px solid var(--line-soft); color: var(--dim);
+  transition: color .15s, border-color .15s, background .15s;
+}
+.trun button:hover { color: var(--text); border-color: rgba(var(--fg), 0.3); }
+.trun .tseg button.on,
+.trun .topt button.on {
+  color: var(--amber-2); background: var(--amber-soft); border-color: rgba(var(--am), 0.4);
+}
+.trun .tval {
+  margin-left: auto; min-width: 54px; text-align: right; font-weight: 500;
+  font-size: calc(11.5px * var(--fsk)); color: var(--dim-2);
+  font-variant-numeric: tabular-nums;
+}
+.trun.on .tval { color: var(--amber-2); }
+.trun .tcx { padding: 4px 6px; color: rgba(var(--fg), 0.45); }
+.trun .tcx:hover { color: var(--bad); border-color: rgba(var(--bad), 0.4); }
+
+/* 手动输入分钟数（v300）：手机键盘弹数字，回车即定时 */
+.tman { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.tman .tnum {
+  width: 78px; flex: 0 0 78px;
+  font-family: inherit; font-size: calc(11.5px * var(--fsk));
+  padding: 4px 8px; border-radius: 8px;
+  background: var(--panel); border: 1px solid var(--line-soft); color: var(--text);
+  outline: none; font-variant-numeric: tabular-nums;
+  transition: border-color .15s;
+}
+.tman .tnum::placeholder { color: var(--dim-2); }
+.tman .tnum:focus { border-color: rgba(var(--am), 0.5); }
+.tman .tnum::-webkit-outer-spin-button,
+.tman .tnum::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.tman .tnum[type=number] { -moz-appearance: textfield; appearance: textfield; }
+.tman .th-u { font-size: calc(11px * var(--fsk)); color: var(--dim-2); }
+.tman .tok {
+  font-family: inherit; font-size: calc(11.5px * var(--fsk)); cursor: pointer;
+  padding: 4px 10px; border-radius: 8px;
+  background: none; border: 1px solid var(--line-soft); color: var(--dim);
+  transition: color .15s, border-color .15s, background .15s;
+}
+.tman .tok:hover {
+  color: var(--amber-2); border-color: rgba(var(--am), 0.4); background: var(--amber-soft);
+}
+
+/* ══════════════════════════════════════════════════════════════
+ * LoveHome 可视化编辑器（lovehome-editor.js）
+ * 独立命名空间 .lh-ed-*，不污染主样式
+ * ══════════════════════════════════════════════════════════════ */
+
+/* 入口按钮（左下角 fn-btn 组里新增的那个） */
+#fnEdit svg { width: 15px; height: 15px; }
+
+/* 编辑器根容器：全屏覆盖在最上层 */
+.lh-editor {
+  position: fixed; inset: 0; z-index: 99999;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none; opacity: 0; transition: opacity .18s;
+}
+.lh-editor.open { pointer-events: auto; opacity: 1; }
+.lh-ed-mask {
+  position: absolute; inset: 0;
+  background: rgba(15, 23, 42, .32); backdrop-filter: blur(6px);
+}
+.lh-ed-panel {
+  position: relative; width: min(1100px, 94vw); height: min(760px, 90vh);
+  min-width: 420px; min-height: 320px;
+  background: #f6f7f9; border: 1px solid rgba(17, 24, 39, .12);
+  border-radius: 16px; overflow: hidden; display: flex; flex-direction: column;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .28);
+  color: #1f2430; font-family: inherit;
+  resize: both;          /* 右下角拖拽调整大小，尺寸会自动记住 */
+}
+
+/* 头部 */
+.lh-ed-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 18px; border-bottom: 1px solid #e3e6eb;
+  background: linear-gradient(180deg, #ffffff 0%, #f1f3f6 100%);
+}
+.lh-ed-title {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 14px; font-weight: 600; color: #1f2430;
+}
+.lh-ed-title svg { width: 18px; height: 18px; fill: #b08a5a; }
+.lh-ed-head-actions { display: flex; gap: 8px; align-items: center; }
+.lh-ed-x {
+  font-family: inherit; background: none; border: none; cursor: pointer;
+  font-size: 22px; line-height: 1; color: #7a8290;
+  padding: 2px 10px; border-radius: 8px; transition: all .12s;
+}
+.lh-ed-x:hover { background: #eef0f4; color: #111; }
+.lh-ed-btn {
+  font-family: inherit; font-size: 12.5px; cursor: pointer;
+  padding: 6px 14px; border-radius: 8px;
+  background: #fff; border: 1px solid #d4d9e0;
+  color: #3a4150; transition: all .15s;
+}
+.lh-ed-btn:hover { background: #f0f2f5; color: #111; border-color: #c2c9d2; }
+.lh-ed-btn.primary {
+  background: #b08a5a; border-color: #b08a5a; color: #fff; font-weight: 600;
+}
+.lh-ed-btn.primary:hover { background: #a2794a; border-color: #a2794a; color: #fff; }
+.lh-ed-btn.danger {
+  background: #fff; border-color: rgba(217, 83, 79, .45); color: #c0392b;
+}
+.lh-ed-btn.danger:hover { background: #fdecea; border-color: #c0392b; color: #a52a20; }
+
+/* Tab 导航 */
+.lh-ed-tabs {
+  display: flex; gap: 2px; padding: 10px 18px;
+  border-bottom: 1px solid #e3e6eb;
+  background: #fbfcfd; flex-wrap: wrap;
+}
+.lh-ed-tab {
+  font-family: inherit; font-size: 13px; cursor: pointer;
+  padding: 7px 14px; border-radius: 8px;
+  background: none; border: none; color: #5f6b7c;
+  transition: all .15s;
+}
+.lh-ed-tab:hover { color: #1f2430; background: #eef0f4; }
+.lh-ed-tab.active {
+  background: #f7efe4; color: #a2733a; font-weight: 600;
+}
+
+/* 主体 */
+.lh-ed-body { flex: 1; overflow: auto; padding: 16px 18px; }
+.lh-ed-empty { color: #98a1ad; padding: 40px; text-align: center; }
+.lh-ed-body .hint { display: block; font-size: 12px; color: #6b7280; margin-top: 4px; }
+
+/* ── 户型图 Tab ── */
+.lh-ed-plan-wrap { display: flex; flex-direction: row; height: 100%; gap: 10px; min-height: 0; }
+.lh-ed-plan-left {
+  display: flex; flex-direction: column; width: 180px; flex: none;
+  gap: 8px; overflow-y: auto; max-height: 100%;
+}
+.lh-ed-plan-tools {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 8px; background: #eef1f5; border-radius: 10px;
+}
+.lh-ed-plan-tools b { font-size: 13px; color: #1f2430; text-align: center; margin-bottom: 2px; }
+.lh-ed-plan-tools .lh-ed-btn { width: 100%; box-sizing: border-box; }
+.lh-ed-plan-tools .hint { font-size: 11px; color: #6b7280; line-height: 1.5; margin-top: 4px; }
+.lh-ed-plan-info {
+  font-size: 11.5px; color: #5f6b7c; padding: 8px 10px;
+  background: #f7f9fc; border-radius: 8px; border: 1px solid #e3e6eb;
+  min-height: 30px; text-align: center;
+}
+
+.lh-ed-plan-canvas {
+  flex: 1; min-width: 0; min-height: 300px;
+  background: #eceff3; border-radius: 12px; border: 1px solid #e0e4ea;
+  overflow: hidden; display: flex; align-items: center; justify-content: center;
+  padding: 16px; position: relative; cursor: default;
+}
+.lh-ed-plan-canvas.panning { cursor: grabbing !important; }
+.lh-ed-plan-canvas.panning svg { cursor: grabbing !important; }
+.lh-ed-plan-canvas.placing { cursor: copy; }
+.lh-ed-plan-canvas.drawing { cursor: crosshair; }
+.lh-ed-plan-svg {
+  width: 100%; height: 100%; max-height: 100%; cursor: crosshair;
+}
+.lh-ed-plan-photo { opacity: .92; }
+.lh-ed-plan-outline {
+  fill: rgba(255, 255, 255, .25); stroke: rgba(31, 36, 48, .35);
+  stroke-width: 1.5; stroke-linejoin: round;
+}
+/* 绘制范围（画布边框）与自动外轮廓（房间凸包曲线） */
+.lh-ed-plan-bound {
+  fill: none; stroke: rgba(31, 36, 48, .16); stroke-width: 1.2;
+  stroke-dasharray: 7 5; pointer-events: none;
+}
+.lh-ed-plan-wall {
+  fill: none; stroke: rgba(104, 114, 128, .22);
+  stroke-linejoin: round; pointer-events: none;
+}
+.lh-ed-plan-room {
+  fill: rgba(176, 138, 90, .10); stroke: rgba(154, 116, 58, .55);
+  stroke-width: 1.5; stroke-linejoin: round; cursor: pointer;
+  transition: fill .15s, stroke .15s;
+}
+.lh-ed-plan-room:hover { fill: rgba(176, 138, 90, .20); stroke: rgba(154, 116, 58, .85); }
+.lh-ed-plan-room.sel, .lh-ed-plan-room.sel:hover {
+  fill: rgba(212, 163, 115, .32); stroke: #a2733a; stroke-width: 2.5;
+}
+.lh-ed-plan-label { cursor: move; }
+.lh-ed-plan-label text { pointer-events: all; }
+.lh-ed-plan-room-name {
+  fill: #2a3140; font-size: 11px; font-weight: 600;
+  text-anchor: middle; dominant-baseline: middle;
+  paint-order: stroke; stroke: rgba(255, 255, 255, .85); stroke-width: 3px;
+}
+.lh-ed-plan-room-name.sel { fill: #a2733a; }
+.lh-ed-plan-room-readout {
+  fill: #8a6a3f; font-size: 9px; font-weight: 500;
+  text-anchor: middle;
+  paint-order: stroke; stroke: rgba(255, 255, 255, .85); stroke-width: 3px;
+}
+.lh-ed-plan-dev { cursor: grab; }
+.lh-ed-plan-dev.dragging { cursor: grabbing; }
+.lh-ed-plan-dev:hover .dot,
+.lh-ed-plan-dev.sel .dot { fill: #b08a5a; stroke: #fff; stroke-width: 1.5; }
+.lh-ed-plan-dev .dot {
+  fill: rgba(107, 135, 184, .9); stroke: rgba(31, 36, 48, .35);
+  stroke-width: 1; transition: fill .15s;
+}
+.lh-ed-plan-dev text {
+  font-size: 9px; fill: #2a3140;
+  text-anchor: middle; pointer-events: none;
+  font-weight: 500;
+  paint-order: stroke; stroke: rgba(255, 255, 255, .85); stroke-width: 3px;
+}
+.lh-ed-plan-vertex {
+  fill: #b08a5a; stroke: #fff; stroke-width: 2;
+  cursor: grab; filter: drop-shadow(0 1px 3px rgba(15, 23, 42, .3));
+}
+.lh-ed-shape-preview {
+  fill: rgba(212, 163, 115, .18); stroke: #b08a5a;
+  stroke-width: 1.5; stroke-dasharray: 5 3;
+}
+.lh-ed-plan-info {
+  padding: 10px 14px; background: #eef1f5;
+  border-radius: 10px; font-size: 12.5px; color: #3a4150;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.lh-ed-plan-info b { color: #a2733a; }
+
+/* 底图栏 */
+.lh-ed-photo-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; background: #f7efe4; border: 1px solid #ecdcc4; border-radius: 10px;
+  font-size: 12.5px; color: #6b5a3e;
+}
+.lh-ed-photo-bar .hint { flex: 1; color: #8a6a3f; margin: 0; min-width: 240px; }
+.lh-ed-photo-bar b { color: #a2733a; }
+.lh-ed-photo-bar label { display: flex; align-items: center; gap: 5px; }
+.lh-ed-photo-bar input {
+  width: 72px; font-family: inherit; font-size: 12.5px; color: #1f2430;
+  padding: 5px 8px; border-radius: 7px;
+  background: #fff; border: 1px solid #d4d9e0;
+}
+.lh-ed-photo-bar input:focus { outline: none; border-color: #b08a5a; }
+
+/* 类型九宫格（图标 + 中文） */
+.kind-row {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
+  gap: 6px; margin-top: 6px;
+}
+.kind-ico {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 4px 6px; border-radius: 10px; cursor: pointer;
+  background: #fff; border: 1.5px solid #e0e4ea; color: #5f6b7c;
+  font-family: inherit; font-size: 11.5px; transition: all .12s;
+}
+.kind-ico svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.kind-ico:hover { border-color: #b08a5a; color: #1f2430; }
+.kind-ico.on {
+  border-color: #b08a5a; background: #f7efe4; color: #a2733a; font-weight: 600;
+}
+
+/* ── 列表 Tab（设备/房间/家电共用） ── */
+.lh-ed-list-wrap { height: 100%; display: flex; flex-direction: column; }
+.lh-ed-list-head {
+  display: flex; align-items: center; gap: 10px; padding: 8px 4px 14px;
+}
+.lh-ed-list-head b { font-size: 14px; color: #1f2430; }
+.lh-ed-list-head .hint { margin-left: 4px; }
+.lh-ed-list-head .lh-ed-btn { margin-left: auto; }
+/* 多选工具条：全选 + 批量删除（包一层容器，避免每个按钮各自 margin-left:auto） */
+.lh-ed-list-actions {
+  margin-left: auto; display: flex; align-items: center; gap: 8px;
+}
+.lh-ed-list-actions .lh-ed-btn { margin-left: 0; }
+.lh-ed-selall {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: #566070; cursor: pointer; user-select: none;
+}
+.lh-ed-cb {
+  flex: 0 0 auto; width: 15px; height: 15px;
+  accent-color: #a2733a; cursor: pointer;
+}
+.lh-ed-row.sel { background: #fdf7ef; border-color: #e3cba8; }
+.lh-ed-btn:disabled { opacity: .45; cursor: not-allowed; }
+.lh-ed-list {
+  flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+}
+.lh-ed-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; background: #fff;
+  border-radius: 10px; border: 1px solid #e6e9ee;
+  transition: background .12s;
+}
+.lh-ed-row:hover { background: #f5f7fa; }
+.lh-ed-row-main { flex: 1; min-width: 0; }
+.lh-ed-row-title {
+  font-size: 13.5px; color: #1f2430; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lh-ed-row-title .lh-ed-row-id { font-weight: 400; color: #98a1ad; font-size: 11.5px; margin-left: 4px; }
+.lh-ed-row-sub { font-size: 11.5px; color: #6b7280; margin-top: 3px; }
+.lh-ed-row-sub code {
+  background: #f2f4f7; padding: 1px 5px; border-radius: 4px;
+  font-size: 11px; color: #51607a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.lh-ed-row-sub b { color: #3a4150; font-weight: 500; }
+.lh-ed-row-actions { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
+.lh-ed-row-actions .lh-ed-btn { padding: 5px 12px; font-size: 12px; }
+
+/* 设备行实时状态徽章 */
+.lh-st {
+  font-size: 11px; font-weight: 600; line-height: 1;
+  padding: 4px 8px; border-radius: 20px; margin-right: 4px;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lh-st.ok { background: #e9f7ec; color: #1e7a34; }
+.lh-st.bad { background: #fdecea; color: #b3261e; }
+.lh-st.off { background: #eef0f4; color: #667085; }
+
+/* ── 弹窗（设备/房间/家电编辑表单） ── */
+.lh-ed-dialog {
+  position: fixed; inset: 0; z-index: 100000;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none; opacity: 0; transition: opacity .15s;
+}
+.lh-ed-dialog.open { pointer-events: auto; opacity: 1; }
+.lh-ed-dialog-mask {
+  position: absolute; inset: 0;
+  background: rgba(15, 23, 42, .35); backdrop-filter: blur(4px);
+}
+.lh-ed-dialog-body {
+  position: relative; width: min(520px, 92vw); max-height: 80vh; overflow-y: auto;
+  background: #fff; border: 1px solid #e3e6eb;
+  border-radius: 14px; padding: 0; display: flex; flex-direction: column;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, .22);
+}
+.lh-ed-dialog-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid #e3e6eb;
+  background: #fbfcfd;
+}
+.lh-ed-dialog-head b { font-size: 14px; color: #1f2430; font-weight: 600; }
+.lh-ed-dialog-close {
+  background: none; border: none; color: #7a8290; font-size: 18px;
+  cursor: pointer; padding: 4px 10px; border-radius: 6px; transition: all .12s;
+}
+.lh-ed-dialog-close:hover { background: #eef0f4; color: #111; }
+.lh-ed-dialog-form { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.lh-ed-dialog-form label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12.5px; color: #566070;
+}
+.lh-ed-dialog-form label.hint { color: #6b7280; font-size: 11.5px; margin-top: 2px; }
+.lh-ed-dialog-form .hint { color: #8b95a3; font-size: 11.5px; font-weight: 400; }
+.lh-ed-dialog-form .kind-row + input[type="hidden"] { display: none; }
+.lh-ed-dialog-form input, .lh-ed-dialog-form select {
+  font-family: inherit; font-size: 13px; color: #1f2430;
+  padding: 8px 12px; border-radius: 8px;
+  background: #fff; border: 1px solid #d4d9e0;
+  transition: border-color .12s, background .12s;
+}
+.lh-ed-dialog-form input:focus, .lh-ed-dialog-form select:focus {
+  outline: none; border-color: #b08a5a; background: #fdfaf5;
+}
+.lh-ed-dialog-form input[readonly] { opacity: .5; cursor: not-allowed; }
+.lh-ed-dialog-form .form-row {
+  display: flex; gap: 10px;
+}
+.lh-ed-dialog-form .form-row label { flex: 1; }
+.lh-ed-dialog-foot {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 12px 18px; border-top: 1px solid #e3e6eb;
+  background: #fbfcfd;
+}
+/* 房间重叠：四种处理方式并排 */
+.lh-ed-overlap-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.lh-ed-overlap-actions .lh-ed-btn { flex: 1 1 44%; padding: 9px 12px; }
+
+/* ── 概览 Tab ── */
+.lh-ed-overview { display: flex; flex-direction: column; gap: 18px; }
+.lh-ed-section {
+  padding: 14px 16px; background: #fff;
+  border: 1px solid #e6e9ee; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.lh-ed-section h4 {
+  font-size: 13px; color: #a2733a; margin: 0; font-weight: 600;
+  padding-bottom: 6px; border-bottom: 1px solid #eceff3;
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.lh-ed-section h4 .lh-ed-hint {
+  font-size: 11.5px; color: #8e97a5; font-weight: 400;
+  border: none; letter-spacing: 0;
+}
+.lh-ed-section h4 .lh-ed-hint code {
+  font-size: 11px; background: #f3f5f8; border-radius: 4px; padding: 0 3px;
+}
+.lh-ed-section label {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12.5px; color: #566070;
+}
+.lh-ed-section label input {
+  flex: 1; font-family: inherit; font-size: 13px; color: #1f2430;
+  padding: 7px 11px; border-radius: 7px;
+  background: #fff; border: 1px solid #d4d9e0;
+}
+.lh-ed-section label input:focus { outline: none; border-color: #b08a5a; background: #fdfaf5; }
+.lh-ed-person {
+  display: flex; gap: 8px; align-items: center;
+}
+.lh-ed-person input {
+  flex: 1; font-family: inherit; font-size: 12.5px; color: #1f2430;
+  padding: 6px 10px; border-radius: 7px;
+  background: #fff; border: 1px solid #d4d9e0;
+}
+.lh-ed-person input:focus { outline: none; border-color: #b08a5a; background: #fdfaf5; }
+
+/* 家人分组：一位家人一个卡片，里面可放多台设备 */
+.lh-ed-pgrp { display: flex; flex-direction: column; gap: 8px; }
+.lh-ed-pgrp-i {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px; background: #fff;
+  border: 1px solid #e3e7ec; border-radius: 9px;
+}
+.lh-ed-pgrp-h {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12px; color: #6b7280;
+}
+.lh-ed-pgrp-i .lh-ed-person input { font-size: 12px; padding: 5px 9px; }
+.lh-ed-pgrp-i > .lh-ed-btn { align-self: flex-start; }
+
+/* ── 侧栏 · 底栏 Tab：一行一个配置项（类型 / 名称 / 图标 / 排序 / 删除）── */
+.lh-ed-plist { display: flex; flex-direction: column; gap: 8px; }
+.lh-ed-prow {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; background: #fff;
+  border: 1px solid #e6e9ee; border-radius: 9px;
+}
+.lh-ed-prow select,
+.lh-ed-prow input {
+  font-family: inherit; font-size: 12.5px; color: #1f2430;
+  padding: 6px 9px; border-radius: 7px;
+  background: #fff; border: 1px solid #d4d9e0; min-width: 0;
+}
+.lh-ed-prow select:focus,
+.lh-ed-prow input:focus { outline: none; border-color: #b08a5a; background: #fdfaf5; }
+.lh-ed-prow select[data-f=kind],
+.lh-ed-prow select[data-f=id] { flex: 0 0 92px; }
+.lh-ed-prow select[data-f=icon] { flex: 0 0 96px; }
+.lh-ed-prow input { flex: 1; }
+.lh-ed-prow .lh-ed-btn { padding: 5px 9px; flex: 0 0 auto; }
+.lh-ed-fixed {
+  flex: 0 0 92px; text-align: center; font-size: 12.5px; color: #a2733a;
+  padding: 6px 9px; border-radius: 7px;
+  background: #fdf7ef; border: 1px dashed #e3cba8;
+}
+.lh-ed-foot-actions {
+  display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px;
+}
+
+/* ── 数据备份 Tab ── */
+.lh-ed-data h3 { font-size: 15px; color: #1f2430; margin: 0 0 6px; }
+.lh-ed-data .hint { color: #6b7280; margin-bottom: 14px; }
+.lh-ed-data .lh-ed-section b { color: #1f2430; }
+.lh-ed-data .lh-ed-section > div:not(b) {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12.5px; color: #4a5262;
+}
+.lh-ed-data .lh-ed-section > div b { color: #a2733a; font-weight: 600; }
+
+/* Toast */
+.lh-ed-toast {
+  position: fixed; top: 32px; left: 50%; transform: translateX(-50%) translateY(-10px);
+  padding: 10px 20px; border-radius: 10px; z-index: 100001;
+  background: #fff; border: 1px solid #e3cba8;
+  color: #1f2430; font-size: 13px; font-weight: 500;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, .18);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s, transform .2s;
+}
+.lh-ed-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ══════════════════════════════════════════════════════════════
+ * HA 实体自动补全选择器
+ * ══════════════════════════════════════════════════════════════ */
+.lh-ent-picker { position: relative; }
+.lh-ent-search {
+  width: 100%; font-family: inherit; font-size: 13px; color: #1f2430;
+  padding: 8px 12px; padding-right: 28px; border-radius: 8px;
+  background: #fff; border: 1px solid #d4d9e0;
+  transition: border-color .12s, background .12s;
+  box-sizing: border-box;
+}
+.lh-ent-search:focus {
+  outline: none; border-color: #b08a5a; background: #fdfaf5;
+}
+.lh-ent-search::placeholder { color: #98a1ad; }
+.lh-ent-dropdown {
+  position: fixed; top: 0; left: 0;
+  max-height: 360px; overflow-y: auto; z-index: 100002;
+  background: #fff; border: 1px solid #e0e4ea;
+  border-radius: 10px; box-shadow: 0 12px 36px rgba(15, 23, 42, .22);
+  padding: 6px 0;
+}
+.lh-ent-group-title {
+  font-size: 11px; color: #8b95a3; font-weight: 600;
+  padding: 8px 12px 4px; letter-spacing: 0.5px;
+  text-transform: uppercase;
+  background: #fafbfc;
+}
+.lh-ent-item {
+  display: grid; grid-template-columns: 1fr auto auto;
+  gap: 8px; padding: 7px 12px; cursor: pointer;
+  font-size: 12.5px; align-items: center;
+  transition: background .1s;
+}
+.lh-ent-item:hover { background: #f7efe4; }
+.lh-ent-name { color: #1f2430; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lh-ent-id {
+  background: #f2f4f7; padding: 1px 6px; border-radius: 4px;
+  font-size: 11px; color: #51607a; font-family: ui-monospace, monospace;
+  max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lh-ent-state {
+  font-size: 11px; color: #5f6b7c;
+  padding: 1px 7px; border-radius: 10px;
+  background: #eef1f5;
+  min-width: 40px; text-align: center;
+}
+
+/* 批量导入 HA 实体弹窗 */
+.lh-ed-dialog.bulk-import .lh-ed-dialog-body { max-height: 85vh; display: flex; flex-direction: column; }
+.bulk-group { border-bottom: 1px solid var(--bd2); }
+.bulk-group-head { padding: 10px 18px; background: var(--bg2, #f0f3f7); display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 2; border-bottom: 1px solid var(--bd2); }
+.bulk-group-head b { font-size: 14px; font-weight: 600; }
+.bulk-group-list { max-height: 280px; overflow-y: auto; padding: 6px 10px; }
+.bulk-item { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid transparent; transition: background 0.1s, border 0.1s; }
+.bulk-item:hover { background: var(--bg2, #eef1f6); border-color: var(--bd2); }
+.bulk-item.already { opacity: 0.4; cursor: not-allowed; }
+.bulk-item input[type=checkbox] { margin: 0; width: 16px; height: 16px; accent-color: var(--amber); }
+.bulk-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.bulk-id { font-family: ui-monospace, monospace; font-size: 11px; color: var(--s3, #8892a6); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bulk-state { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--bg2, #e8ebf0); min-width: 44px; text-align: center; font-weight: 500; }
+.bulk-state.on { background: rgba(34,197,94,0.15); color: #22c55e; }
+.bulk-state.off { background: rgba(107,114,128,0.15); color: #6b7280; }
+.bulk-state.unavailable { background: rgba(239,68,68,0.15); color: #ef4444; }
+
+/* 新批量导入：按设备卡片分组 */
+.bulk-dev-list { display: flex; flex-direction: column; gap: 8px; }
+.bulk-dev-card { border: 1px solid var(--bd2, #e3e6eb); border-radius: 8px; overflow: hidden; }
+.bulk-dev-card.all-already { opacity: 0.5; }
+.bulk-dev-head { padding: 8px 12px; background: var(--bg2, #f4f6f9); display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--bd2, #e3e6eb); }
+.bulk-dev-label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.bulk-dev-label input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--amber); }
+.bulk-dev-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--s3, #8892a6); }
+.bulk-dev-kind { background: rgba(255,170,40,0.15); color: var(--amber-2, #e08a20); padding: 1px 6px; border-radius: 6px; font-weight: 500; }
+.bulk-dev-model { opacity: 0.7; font-family: ui-monospace, monospace; font-size: 10px; }
+.bulk-dev-count { font-weight: 500; }
+.bulk-dev-toggle { border: none; background: none; cursor: pointer; font-size: 14px; color: var(--s3, #8892a6); padding: 0 4px; margin-left: auto; }
+.bulk-dev-toggle:hover { color: var(--fg, #1a202c); }
+.bulk-dev-ents { display: flex; flex-direction: column; padding: 4px 8px; gap: 2px; max-height: 240px; overflow-y: auto; }
+.lh-ent-picker { position: relative; }
+.lh-ent-dropdown { position: fixed; background: #fff !important; border: 1px solid var(--bd2, #e3e6eb); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 200000; overflow: hidden; color: #1a202c; }
+
+/* 选中实体后的存在性提示条 */
+.lh-ent-status {
+  font-size: 12px; line-height: 1.6; padding: 7px 11px; border-radius: 8px;
+  margin-top: 6px;
+}
+.lh-ent-status.ok {
+  background: #e9f7ec; border: 1px solid #c6e7cd; color: #1e7a34;
+}
+.lh-ent-status.bad {
+  background: #fdecea; border: 1px solid #f5c6c2; color: #b3261e;
+}
+
+/* ── 存储模式徽章 / 状态条 ── */
+.lh-ed-badge {
+  font-size: 10.5px; font-weight: 600; line-height: 1;
+  padding: 4px 9px; border-radius: 20px; margin-left: 10px;
+  border: 1px solid #dfe3e9;
+  color: #667085; background: #fff;
+}
+.lh-ed-badge.ok {
+  color: #1e7a34; border-color: #c6e7cd; background: #e9f7ec;
+}
+.lh-ed-badge.warn {
+  color: #8a5b12; border-color: #f0dcb4; background: #fdf6e7;
+}
+.lh-ed-store {
+  padding: 12px 14px; border-radius: 10px;
+  font-size: 12.5px; line-height: 1.7; margin-bottom: 12px;
+}
+.lh-ed-store.ok {
+  background: #e9f7ec; border: 1px solid #c6e7cd; color: #24603a;
+}
+.lh-ed-store.ok b { color: #1e7a34; }
+.lh-ed-store.warn {
+  background: #fdf6e7; border: 1px solid #f0dcb4; color: #7a5a24;
+}
+.lh-ed-store.warn b { color: #8a5b12; }
+
+/* ── 最近动态（审计日志）────────────────────────────────── */
+.audit-box { padding: 8px 0; }
+.audit-stats {
+  display: flex; flex-wrap: wrap; gap: 6px 10px;
+  padding: 10px 16px; font-size: 12px;
+  color: var(--s3); border-bottom: 1px solid var(--bd2);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), transparent);
+}
+.audit-stats b { color: var(--fg); font-weight: 600; }
+.audit-sep { color: var(--bd2); }
+.audit-list { padding: 4px 0; }
+.audit-row {
+  display: grid;
+  grid-template-columns: 72px 36px 1fr;
+  gap: 8px; padding: 8px 16px;
+  align-items: center;
+  border-bottom: 1px solid transparent;
+  transition: background .15s;
+}
+.audit-row:hover { background: rgba(255,255,255,.03); border-bottom-color: var(--bd2); }
+.audit-time {
+  font-size: 12px; color: var(--s3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.audit-ico {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 8px;
+  background: rgba(255,255,255,.06); color: var(--s2);
+}
+.audit-ico svg { width: 18px; height: 18px; }
+.audit-info { min-width: 0; }
+.audit-main {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13.5px; line-height: 1.3;
+}
+.audit-main b { font-weight: 600; color: var(--fg); }
+.audit-tag {
+  font-size: 10.5px; font-weight: 500;
+  padding: 1px 7px; border-radius: 10px;
+  letter-spacing: 0.3px; flex-shrink: 0;
+}
+.audit-tag.audit-service_call {
+  background: rgba(77,172,255,.15); color: #6ac0ff;
+}
+.audit-tag.audit-timer_set {
+  background: rgba(255,180,70,.15); color: #ffb545;
+}
+.audit-tag.audit-timer_clear {
+  background: rgba(255,100,100,.15); color: #ff7070;
+}
+.audit-tag.audit-timer_fired {
+  background: rgba(100,220,130,.15); color: #5cd67d;
+}
+.audit-sub {
+  font-size: 12px; color: var(--s3);
+  margin-top: 2px; display: flex; gap: 6px; align-items: center;
+}
+.audit-sub code {
+  font-family: inherit; font-size: 10.5px;
+  padding: 1px 5px; border-radius: 4px;
+  background: rgba(255,255,255,.06); color: var(--s4);
+}
+
+/* ── 审计筛选 tabs ── */
+.audit-tabs {
+  display: flex; align-items: center; gap: 4px;
+  padding: 8px 12px; border-bottom: 1px solid var(--bd2);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), transparent);
+  position: sticky; top: 0; z-index: 2;
+}
+.audit-tab {
+  font-size: 12.5px; font-weight: 500;
+  padding: 5px 12px; border-radius: 14px;
+  background: transparent; color: var(--s3);
+  border: 1px solid transparent; cursor: pointer;
+  transition: all .15s;
+}
+.audit-tab:hover { background: rgba(255,255,255,.06); color: var(--fg); }
+.audit-tab.on {
+  background: rgba(255,255,255,.1); color: var(--fg);
+  border-color: var(--bd2);
+}
+.audit-refresh {
+  margin-left: auto; width: 28px; height: 28px;
+  border-radius: 50%; border: none;
+  background: rgba(255,255,255,.06); color: var(--s2);
+  cursor: pointer; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .3s, background .15s;
+}
+.audit-refresh:hover { background: rgba(255,255,255,.12); color: var(--fg); }
+.audit-refresh:active { transform: rotate(180deg); }
