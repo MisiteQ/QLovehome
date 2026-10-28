@@ -4733,17 +4733,25 @@
       </div>
       <ul>
         <li>一个给 <b>Home Assistant</b> 用的家庭大屏面板，面向有米家设备、想在门口 / 客厅放一块平板的用户。</li>
-        <li>核心能力：<b>户型图可视化 + 房间温湿度 + 灯光中控 + 安防状态 + 家电汇总 + 天气日历</b>。</li>
-        <li>运行方式：Home Assistant 自定义集成（<code>custom_components/lovehome</code>），前端纯原生 HTML + SVG + JS，不走 Webpack，源码可读可改。</li>
-        <li>所有个性化设置（字体大小、面板透明度、主题深浅、四季配色、待机时间、户型数据）都保存在 <b>Home Assistant 服务器</b>的 QLovehome 集成目录里，换电脑 / 换浏览器自动还原；localStorage 只作本机缓存。</li>
+        <li>核心能力：<b>户型图可视化 + 房间温湿度 + 灯光中控 + 空调扫风 + 安防状态 + 家电汇总 + 最近动态 + 天气日历</b>。</li>
+        <li>两种运行方式共用同一套前端，任选其一：
+          <ul>
+            <li><b>HAOS Add-on（推荐）</b>：独立 Python 进程 + HA WebSocket，Supervisor 一键装，<code>设置 → 加载项 → 添加仓库 → QLovehome</code></li>
+            <li><b>HA Integration</b>：HACS 安装，后端直接用 hass 对象，<code>HACS → 集成 → 自定义存储库</code></li>
+          </ul>
+        </li>
+        <li>前端纯原生 HTML + SVG + JS，不走 Webpack，源码可读可改。配置存在 HA 服务器（Add-on 存 <code>/data/qlh-config.json</code>，Integration 存 <code>qlh/qlh-config.json</code>），换电脑 / 换浏览器自动还原。</li>
       </ul>
       <div class="about-grid">
         <div class="about-cell"><b>户型图</b><span>矢量 SVG 渲染，支持矩形 / 多边形 / 圆形房间，支持底图导入，墙体自动融合成一体</span></div>
-        <div class="about-cell"><b>中控</b><span>灯光 / 插座 / 空调 / 风扇统一开关 + 调光调色温，实体选哪个开哪个</span></div>
+        <div class="about-cell"><b>中控</b><span>灯光 / 插座 / 空调（含扫风） / 风扇统一开关 + 调光调色温，实体选哪个开哪个</span></div>
         <div class="about-cell"><b>概览</b><span>家人在线、今日用电、安防、温湿度、电池、摄像头、网络、系统状态一页看完</span></div>
+        <div class="about-cell"><b>最近动态</b><span>自动记录所有设备操控、定时设置、定时到点执行，JSONL 存服务器，支持事件类型筛选</span></div>
+        <div class="about-cell"><b>定时调度</b><span>服务器端调度，关面板 / 退出账号也照常跑；手动输入分钟数（1~1440）</span></div>
+        <div class="about-cell"><b>子设备绑定</b><span>热水器绑水量传感器、灯绑子灯组，子设备自动从户型图剔除，只在主设备面板展示</span></div>
         <div class="about-cell"><b>主题</b><span>深 / 浅色自动跟随日出日落，四季配色自动切换，房间色块随温度冷暖变化</span></div>
         <div class="about-cell"><b>屏保</b><span>无操作自动进待机大屏时钟，触控 / 键盘 / 滚轮任意操作唤醒</span></div>
-        <div class="about-cell"><b>编辑器</b><span>可视化画户型、拖房间、加设备、改名字，空格平移画布、滚轮缩放</span></div>
+        <div class="about-cell"><b>编辑器</b><span>可视化画户型、拖房间、加设备、改名字，空格平移画布、滚轮缩放，支持从 HA 批量导入实体</span></div>
       </div>
       <p class="muted">感谢 Home Assistant 社区，感谢所有无私分享集成和实体名的朋友们。</p>
       <div class="about-foot">QLoveHome · Made with ❤️ for smart homes<br>
