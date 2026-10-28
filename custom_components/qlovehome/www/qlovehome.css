@@ -2228,6 +2228,20 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 }
 .lh-ed-person input:focus { outline: none; border-color: #b08a5a; background: #fdfaf5; }
 
+/* 家人分组：一位家人一个卡片，里面可放多台设备 */
+.lh-ed-pgrp { display: flex; flex-direction: column; gap: 8px; }
+.lh-ed-pgrp-i {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px; background: #fff;
+  border: 1px solid #e3e7ec; border-radius: 9px;
+}
+.lh-ed-pgrp-h {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12px; color: #6b7280;
+}
+.lh-ed-pgrp-i .lh-ed-person input { font-size: 12px; padding: 5px 9px; }
+.lh-ed-pgrp-i > .lh-ed-btn { align-self: flex-start; }
+
 /* ── 侧栏 · 底栏 Tab：一行一个配置项（类型 / 名称 / 图标 / 排序 / 删除）── */
 .lh-ed-plist { display: flex; flex-direction: column; gap: 8px; }
 .lh-ed-prow {

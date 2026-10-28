@@ -3798,7 +3798,7 @@
        手表 14 个实体里只用了 3 个，但「其他设备」是按 device_id 归并的 → 只要
        有一个实体被认领，整台设备就跳过。 */
     (((LH.config || {}).overview || {}).people || []).forEach((p) => {
-      if (p.entity) s.add(p.entity);
+      personEnts(p).forEach((e) => s.add(e));
       const w = p.watch;
       if (w) ['tracker', 'charge', 'place'].forEach((k) => { if (w[k]) s.add(w[k]); });
     });
@@ -4014,14 +4014,14 @@
     /* 卡片顺序（v212 起，用户要求）：用电 · 安防 · 温湿度 · 电池耗材 · 摄像头 排前面，
        网络 / 系统 / 其他设备 这三张「运维向」的挪到最后面 —— 它们不是天天看的东西。
        三张卡的构造都留在函数末尾，变量（down/up/nEnt）照旧在上面算。
-       v217：最前面加「家人」（ping 判在线，齐齐两台设备任一在线即算在家）。 */
+       v217：最前面加「家人」（ping 判在线，一位家人可挂多台设备，任一在线即算在家）。 */
     const PPL = (LH.config.overview || {}).people || [];
     if (PPL.length) {
-      const homeN = PPL.filter((p) => { const s = st(p.entity); return !!(s && s.state === 'on'); }).length;
+      const homeN = PPL.filter((p) => personState(p).online).length;
       let withWatch = 0;
       const ph = '<div class="ppl-grid">' + PPL.map((p, pi) => {
-        const s = st(p.entity);
-        const on = !!(s && s.state === 'on');
+        const ps = personState(p);
+        const on = ps.online;
         /* v222：配了手表的（墨墨）名字下面多一行小字：电量 · 充电 · 在哪。
            位置只在出门时报（在家那行已经写着「在家」，再说一遍地址是废话） */
         const w = watchOf(p);
@@ -4034,10 +4034,11 @@
           '<i class="d ' + (on ? 'ok' : 'no') + '"></i>' +
           '<div class="ppl-m"><span>' + label + '</span>' +
           (line ? '<em>' + line + '</em>' : '') + '</div>' +
-          '<b>' + (on ? '在家' : '离家') + '</b></div>';
+          '<b>' + (on ? '在家' : ps.known ? '离家' : '检测中') + '</b></div>';
       }).join('') + '</div>' +
-        '<div class="card-sub">按设备联网判定 · 手机休眠时可能短时显示离家'
-        + ' · 点一行看详情</div>';
+        '<div class="card-sub">按 ' + PPL.reduce((n, p) => n + personEnts(p).length, 0) +
+        ' 台设备联网判定 · 任意一台在线即算在家 · 手机休眠时可能短时显示离家' +
+        ' · 点一行看详情</div>';
       const pc = card('家人', 'i-user', homeN + ' 人在家', ph);
       /* v225：每一行都可点 → 详情页 */
       pc.querySelectorAll('.ppl-i').forEach((row) => {
@@ -4437,10 +4438,13 @@
                 <li><b>路由器集成</b>（ASUSWRT / OpenWrt ubus / 小米路由器 等在 HACS 里都有）：装上后每台连上 Wi-Fi 的设备
                   自动有一个 <code>device_tracker.*</code>，直接用也行，免手动一个个 Ping。</li>
               </ol></li>
-            <li><b>第三步：回到 LoveHome 挂上这个实体</b>
-              点左下角 <b>编辑</b>（铅笔图标）→ 切 <b>概览 · 家人 · 网关</b> tab →「家人在线」里找到（或新建）一行 →
+            <li><b>第三步：回到 QLovehome 挂上这个实体</b>
+              点左下角 <b>编辑</b>（铅笔图标）→ 切 <b>概览 · 家人 · 网关</b> tab →「家人在线」里找到（或新建）一位家人 →
               <b>实体</b> 那一栏点输入框 → 弹出实体选择器 → 选刚才那个 <code>binary_sensor.*</code> 或
               <code>device_tracker.*</code> → 顶部 <b>完成</b> 保存。</li>
+            <li><b>一位家人想挂多台设备</b>（手机 + 儿童手表 + 平板）：在那一行的 <b>+ 设备</b> 里继续加，
+              每台各选一个实体即可。判定规则是<b>任意一台在线 = 在家</b>，全都离线才显示离家 ——
+              这样手机休眠、手表断连都不会误判成「全家没人」。</li>
           </ol>
           <ul>
             <li class="warn"><b>前提：HA 所在容器 / 主机必须和手机在同一局域网且能 ping 通该 IP。</b>
@@ -4448,8 +4452,8 @@
             <li class="warn">如果装了 Ping 集成但永远 unavailable，十有八九是容器网络问题。先在 HA 的
               <code>开发者工具 → 服务 → shell_command</code> 里 <code>ping -c 3 192.168.1.23</code> 手动测一下，
               能通再装 Ping 集成。</li>
-            <li>「两台设备任一在线即算在家」这种多探针写在模板的 <code>probes</code> 里，
-              目前编辑器没开放这一项，需要时在 <b>编辑器 → 数据备份 → 导出 JSON</b> 里改。</li>
+            <li><b>一位家人要多台设备</b>：编辑器「概览 · 家人 · 网关」里那一行点 <b>+ 设备</b> 继续加，
+              每台选自己的实体；任意一台在线就算在家（不需要改 JSON）。</li>
             <li>手机休眠 / Wi-Fi 省电会短时不通，看到「离家」先等一轮，不要立刻判定 Ping 集成坏了。</li>
           </ul>
         </details>
@@ -5102,6 +5106,28 @@
     const start = cut > 0 ? Math.max(0, cut - 5) : Math.max(0, x.length - 12);
     return (start > 0 ? '…' : '') + x.slice(start, start + 12);
   }
+  /* ── 家人 ↔ 多台设备（v301）──
+     一位家人可以挂多个探测实体：手机 ping、儿童手表定位、平板……任意一台在线即算在家。
+     旧配置只有一个 entity，这里自动兼容（读的时候并进 entities）。
+     注意：IP 本身不在面板里配 —— 面板读的是 HA 里由 Ping 集成 / 路由集成
+     生成的 binary_sensor / device_tracker 实体。 */
+  function personEnts(p) {
+    if (!p) return [];
+    const arr = Array.isArray(p.entities) ? p.entities.filter(Boolean) : [];
+    if (p.entity && arr.indexOf(p.entity) < 0) arr.unshift(p.entity);
+    return arr;
+  }
+  function personState(p) {
+    const ents = personEnts(p);
+    let online = false, known = false;
+    ents.forEach((e) => {
+      const s = st(e);
+      if (!s || s.state === 'unavailable' || s.state === 'unknown') return;
+      known = true;
+      if (s.state === 'on') online = true;
+    });
+    return { ents: ents, online: online, known: known };
+  }
   function watchOf(p) {
     const w = p && p.watch;
     if (!w) return null;
@@ -5240,9 +5266,14 @@
     const box = $('#personCards');
     if (!box) return;
     box.innerHTML = '';
-    const home = st(p.entity);
-    const on = !!(home && home.state === 'on');
-    const known = !!home && home.state !== 'unavailable' && home.state !== 'unknown';
+    const ps = personState(p);
+    const on = ps.online;
+    const known = ps.known;
+    /* 多台设备：持续时间取最早开始、最新探测取最近一次（任一在线即算在家） */
+    const rows = ps.ents.map((e) => ({ e: e, s: st(e) }));
+    const good = rows.filter((x) => x.s && x.s.state !== 'unavailable' && x.s.state !== 'unknown');
+    const since = good.map((x) => x.s.last_changed).filter(Boolean).sort()[0];
+    const latest = good.map((x) => x.s.last_updated).filter(Boolean).sort().pop();
 
     /* ① 在家状态：人人都有的一块（大字在家/离家 + 探测明细） */
     const probes = (p.probes || []).map((x) => {
@@ -5250,18 +5281,25 @@
       const v = !s ? '读不到' : s.state === 'on' ? '在线' : s.state === 'off' ? '离线' : s.state;
       return [x.n, v + (s && s.last_updated ? '（' + ago(s.last_updated) + '）' : '')];
     });
+    /* 没配 probes 的老配置：把挂在这位家人名下的实体直接列出来 */
+    const entRows = rows.map((x) => {
+      const v = !x.s ? '读不到' : x.s.state === 'on' ? '在线'
+        : x.s.state === 'off' ? '离线' : x.s.state;
+      return [x.e, v + (x.s && x.s.last_updated ? '（' + ago(x.s.last_updated) + '）' : '')];
+    });
     const c1 = card('在家状态', 'i-home', '',
       '<div class="kv"><b>' + (known ? (on ? '在家' : '离家') : '检测中') + '</b><span>' +
-      (known ? (on ? '设备连着家里 WiFi' : '设备都不在网里') : 'command_line 还没跑完第一轮') + '</span></div>' +
+      (known ? (on ? '至少一台设备连着家里 WiFi' : '设备都不在网里') : 'command_line 还没跑完第一轮') + '</span></div>' +
       '<div class="pwr">' +
-        '<div class="pwr-i"><em>判定方式</em><b>WiFi ping</b></div>' +
-        '<div class="pwr-i"><em>已持续</em><b>' + (home && home.last_changed ? ago(home.last_changed) : '—') + '</b></div>' +
-        '<div class="pwr-i"><em>最新探测</em><b>' + (home && home.last_updated ? ago(home.last_updated) : '—') + '</b></div>' +
+        '<div class="pwr-i"><em>判定方式</em><b>' + ps.ents.length + ' 台设备 · 任一在线</b></div>' +
+        '<div class="pwr-i"><em>已持续</em><b>' + (since ? ago(since) : '—') + '</b></div>' +
+        '<div class="pwr-i"><em>最新探测</em><b>' + (latest ? ago(latest) : '—') + '</b></div>' +
       '</div>' +
       '<div class="card-sub">' + (p.note ? p.note + ' · ' : '') +
-      '容器每轮 ICMP ping 一次设备 IP；手机休眠 / Wi-Fi 省电会短时不通，看到「离家」先别急</div>');
-    if (probes.length) {
-      c1.append(wFold('探测明细（' + probes.length + ' 台）', watchRows(probes, 'ip'), true));
+      '容器每轮 ICMP ping 一次设备 IP；任意一台在线即算在家。手机休眠 / Wi-Fi 省电会短时不通，看到「离家」先别急</div>');
+    const foldRows = probes.length ? probes : entRows;
+    if (foldRows.length) {
+      c1.append(wFold('探测明细（' + foldRows.length + ' 台）', watchRows(foldRows, 'ip'), true));
     }
     box.append(c1);
 
@@ -5362,16 +5400,17 @@
     if (!bar) return;
     const PPL = (LH.config.overview || {}).people || [];
     PPL.forEach((p, pi) => {
-      const chip = bar.querySelector('[data-ent="' + p.entity + '"]');
+      const chip = bar.querySelector('[data-pi="' + pi + '"]');
       if (!chip) return;
-      const s = st(p.entity);
-      const on = !!(s && s.state === 'on');
+      const ps = personState(p);
+      const on = ps.online;
       const w = watchOf(p);
       chip.classList.toggle('on', on);
       chip.classList.toggle('low', !!(w && w.batt != null && w.batt <= WATCH_LOW));
       const line = w ? watchLine(w) : '';
       chip.title = '家人 ' + (pi + 1) + ' · ' + (on ? '在家'
-        : s && s.state !== 'unavailable' && s.state !== 'unknown' ? '离家' : '检测中') +
+        : ps.known ? '离家' : '检测中') +
+        '（' + ps.ents.length + ' 台设备，任一在线即在家）' +
         (line ? ' · ' + line : '') + ' · 点开看详情';
     });
   }
@@ -5651,7 +5690,7 @@
       PPL.forEach((p, pi) => {
         const b = el('button', 'ppl-chip');
         b.type = 'button';
-        b.dataset.ent = p.entity;
+        b.dataset.pi = pi;
         b.title = '家人 ' + (pi + 1) + ' · 按设备联网判定，点开看详情';
         b.innerHTML = '<svg><use href="#' + (p.watch ? 'i-watch' : 'i-user') + '"/></svg>' +
           '<i class="d"></i>';

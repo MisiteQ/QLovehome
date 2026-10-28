@@ -206,6 +206,14 @@
     persist();
   }
 
+  /* 家人可挂多台设备：统一读 entities 数组，兼容旧的单 entity */
+  function personEnts(p) {
+    if (!p) return [];
+    const arr = Array.isArray(p.entities) ? p.entities.slice() : [];
+    if (p.entity && arr.indexOf(p.entity) < 0) arr.unshift(p.entity);
+    return arr;
+  }
+
   /* ── 编辑器模态框：DOM 结构 ────────────────────────── */
   let editorRoot = null;
 
@@ -2833,12 +2841,20 @@
         </details>
       </div>
       <div class="lh-ed-section">
-        <h4>家人在线 <small class="lh-ed-hint">先在路由器绑手机固定 IP → HA 装 Ping 集成 → 这里填它生成的 binary_sensor.*</small></h4>
-        <div id="peopleList">${(ov.people || []).map((p, i) => `
-          <div class="lh-ed-person">
-            <input value="${(p.entity || '').replace(/"/g, '&quot;')}" data-pf="entity" data-pi="${i}" placeholder="binary_sensor 实体">
-            <button type="button" class="lh-ed-btn danger" data-pdel="${i}">删</button>
-          </div>`).join('')}</div>
+        <h4>家人在线 <small class="lh-ed-hint">一位家人可挂多台设备（手机 / 手表 / 平板），任意一台在线即算在家；填 Ping 集成生成的 binary_sensor.* 或 device_tracker.*</small></h4>
+        <div id="peopleList" class="lh-ed-pgrp">${(ov.people || []).map((p, i) => {
+          const ents = personEnts(p);
+          if (!ents.length) ents.push('');
+          return `<div class="lh-ed-pgrp-i">
+            <div class="lh-ed-pgrp-h"><span>家人 ${i + 1}</span>
+              <button type="button" class="lh-ed-btn danger" data-pdel="${i}">删家人</button></div>
+            ${ents.map((e, j) => `<div class="lh-ed-person">
+              <input value="${String(e || '').replace(/"/g, '&quot;')}" data-pf="entities" data-pi="${i}" data-pj="${j}" placeholder="设备 ${j + 1} · binary_sensor / device_tracker">
+              ${ents.length > 1 ? `<button type="button" class="lh-ed-btn" data-pdelent="${i}:${j}" title="移除这台设备">−</button>` : ''}
+            </div>`).join('')}
+            <button type="button" class="lh-ed-btn" data-padd="${i}">+ 设备</button>
+          </div>`;
+        }).join('')}</div>
         <button class="lh-ed-btn" id="peopleAdd" type="button">+ 添加家人</button>
       </div>
       <div class="lh-ed-section">
@@ -2870,7 +2886,7 @@
     createEntityPicker($('#wTemp', wrap), { domains: ['sensor', 'climate'], placeholder: '温度传感器' });
     createEntityPicker($('#wHum', wrap), { domains: ['sensor', 'climate'], placeholder: '湿度传感器' });
     createEntityPicker($('#wKwh', wrap), { domains: ['sensor'], placeholder: '用电传感器' });
-    wrap.querySelectorAll('[data-pf="entity"]').forEach((inp) =>
+    wrap.querySelectorAll('[data-pf="entities"]').forEach((inp) =>
       createEntityPicker(inp, { domains: ['binary_sensor', 'device_tracker'], placeholder: '家人存在检测' }));
     wrap.querySelectorAll('[data-cf="entity"]').forEach((inp) =>
       createEntityPicker(inp, { domains: ['camera', 'image'], placeholder: '摄像头实体' }));
@@ -2917,19 +2933,42 @@
       document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     };
 
-    // 家人
+    // 家人（一位家人可挂多台设备）
     $('#peopleAdd', wrap).onclick = () => {
       if (!ov.people) ov.people = [];
-      ov.people.push({ entity: '' });
+      ov.people.push({ entity: '', entities: [''] });
       rerenderEditorTab();
     };
-    wrap.querySelectorAll('[data-pf]').forEach((inp) => {
+    wrap.querySelectorAll('[data-pf="entities"]').forEach((inp) => {
       inp.oninput = () => {
-        const i = Number(inp.dataset.pi);
-        if (!ov.people[i]) ov.people[i] = {};
-        ov.people[i][inp.dataset.pf] = inp.value;
+        const i = Number(inp.dataset.pi), j = Number(inp.dataset.pj);
+        const p = ov.people[i] || (ov.people[i] = {});
+        const ents = personEnts(p);
+        while (ents.length <= j) ents.push('');
+        ents[j] = inp.value;
+        p.entities = ents;
+        p.entity = ents.filter(Boolean)[0] || '';   // 兼容旧字段
         markDirty();
       };
+    });
+    wrap.querySelectorAll('[data-padd]').forEach((b) => b.onclick = () => {
+      const i = Number(b.dataset.padd);
+      const p = ov.people[i] || (ov.people[i] = {});
+      const ents = personEnts(p);
+      ents.push('');
+      p.entities = ents;
+      markDirty(); rerenderEditorTab();
+    });
+    wrap.querySelectorAll('[data-pdelent]').forEach((b) => b.onclick = () => {
+      const [i, j] = b.dataset.pdelent.split(':').map(Number);
+      const p = ov.people[i];
+      if (!p) return;
+      const ents = personEnts(p);
+      ents.splice(j, 1);
+      if (!ents.length) ents.push('');
+      p.entities = ents;
+      p.entity = ents.filter(Boolean)[0] || '';
+      markDirty(); rerenderEditorTab();
     });
     wrap.querySelectorAll('[data-pdel]').forEach((b) => b.onclick = () => {
       ov.people.splice(Number(b.dataset.pdel), 1);
