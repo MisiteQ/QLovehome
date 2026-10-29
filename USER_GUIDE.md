@@ -1,6 +1,6 @@
 # QLoveHome · 使用帮助（详细版）
 
-> **适用版本**：v1.4.0  
+> **适用版本**：v1.4.1  
 > **适用人群**：Home Assistant 2024.6+ 用户  
 > **前置条件**：已安装 Home Assistant，有一台平板（门口 / 客厅常亮）
 
@@ -50,9 +50,9 @@
 
 1. **Home Assistant → 设置 → 加载项 → 右上角 ⋮ → 添加加载项仓库**
 2. URL：`https://github.com/MisiteQ/QLovehome`
-3. 类别：**Home Assistant** → 添加
+3. 点 **添加**（仓库根的 `repository.yaml` 自动识别）
 4. 列表里找到 **QLovehome** → 点 **安装**（首次构建约 3-5 分钟）
-5. 完成后侧边栏自动出现 **QLovehome** 🎉
+5. 完成后侧边栏自动出现 **QLovehome** 🎉（没出现就从「加载项 → QLovehome → 打开 WEB UI」进）
 
 > 💡 Add-on 后端是独立 Python 进程，通过 HA WebSocket API 连接本机 HA（令牌由 Supervisor 自动注入），配置和审计日志存在 `/data/` 目录。HA 重启后定时任务自动恢复。
 
@@ -129,18 +129,21 @@ Dashboard → **网页卡片（iframe）** → 地址：
 - **sensor / binary_sensor / script / scene** 这些不会出现在批量列表里——它们不是"可控制设备"，而是状态 / 自动化
 - 导入后在设备 tab 里**每台设备右侧有实时状态徽章**：✅ on / 🔴 off / ⚠ 离线 / ❌ 不存在
 
-### 方式 B：改 gen_lovehome_data.py（进阶）
+### 方式 B：改 gen_qlovehome_data.py（进阶）
 
 适合：设备特别多想一次性生成、或者要自定义房间名 / 概览里的家人 / 用电等特殊实体。
 
 ```bash
-# 1. 改 gen_lovehome_data.py 里的实体 ID 和房间
+# 1. 改 gen_qlovehome_data.py 里的实体 ID 和房间
 # 2. 生成数据层
-python gen_lovehome_data.py
+python gen_qlovehome_data.py
 
-# 3. 把生成的 lovehome-data.js 传到 /config/www/lovehome/
+# 3. 把生成的 qlovehome-data.js 复制到 custom_components/qlovehome/www/
+#    （Add-on 模式再复制一份到 qlovehome_addon/www/）
 # 4. index.html 里的 ?v=N 加 1（浏览器缓存）
 ```
+
+> 这两个脚本只放在 GitHub 仓库里，**HACS / Add-on 发布包不含**。不想折腾就跳过——用上面方式 A 在编辑器里导入即可。
 
 ### 实体 ID 怎么找？
 
@@ -171,15 +174,18 @@ python gen_lovehome_data.py
 
 ## 4. 换户型
 
-三种做法：
+四种做法：
 
-| 方式 | 命令 | 适合 |
+| 方式 | 怎么做 | 适合 |
 |---|---|---|
-| A. 直接用模板 | 什么都不改 | 先看效果 |
-| B. 现实风照片底板 | 把你的户型照片存 `custom_components/lovehome/www/assets/plan-real.jpg`，跑 `python calib_real.py <原图路径>` | 想让照片当底板，上面叠设备图标 |
-| C. 重新提取多边形 | `python extract_rooms.py 标注图.png 户型图.png` → 生成新 `rooms_poly.json` → 再跑 gen 脚本 | 户型完全不同，想自定义房间形状 |
+| ⭐ **A. 编辑器直接画** | 主界面左下角铅笔 → 户型 tab → 矩形 / 圆形 / 多边形工具绘制，拖拽调整 | **绝大多数人，推荐** |
+| B. 用模板不动 | 什么都不改 | 先看效果 |
+| C. 现实风照片底板 | 照片存 `www/assets/plan-real.jpg`，跑 `python calib_real.py <原图路径>` | 想让照片当底板，上面叠设备图标 |
+| D. 重新提取多边形 | `python extract_rooms.py 标注图.png 户型图.png` → 生成新 `rooms_poly.json` → 再跑 gen 脚本 | 户型完全不同，想自定义房间形状 |
 
-`rooms_poly.json` 是**唯一几何源头**。墙体、房间色块、标签位置全由它推导。改了它之后跑 `gen_lovehome_data.py` 就重新生成一遍。
+> ⚠️ C / D 需要仓库里的 Python 脚本，HACS / Add-on 发布包里不含（见 `.hacsignore`）。想用请从 GitHub 克隆仓库。
+
+`rooms_poly.json` 是**唯一几何源头**。墙体、房间色块、标签位置全由它推导。改了它之后跑 `gen_qlovehome_data.py` 就重新生成一遍。
 
 ---
 
@@ -196,7 +202,7 @@ python gen_lovehome_data.py
 | **待机时间** | 无操作后多久进屏保（1-60 分钟） |
 | **关于** | 版本号 + 功能亮点 |
 
-所有设置都存在**本机浏览器的 localStorage**，不上传服务器。换浏览器 / 清浏览器数据会重置。
+所有设置都存在**HA 服务器**（Add-on：`/data/qlh-config.json`；集成：`qlh/qlh-config.json`），换浏览器 / 换电脑 / 退出账号都会自动还原。浏览器 localStorage 只当启动缓存。
 
 ---
 
@@ -292,9 +298,11 @@ python gen_lovehome_data.py
 
 | 现象 | 原因 | 解决 |
 |---|---|---|
-| 🆕 **Error setting up entry for lovehome** | v1.0.0 的 panel_custom API 签名在 HA 2024.6+ 不兼容 | 升级到 **v1.0.1**（已修复，改用 frontend.register_built_in_panel） |
-| 侧边栏没出现 LoveHome | panel 注册可能失败（非致命） | Dashboard 手动加 iframe 卡片 → `/api/lovelace/lovehome/` |
-| 页面空白 | iframe 地址写错 / 文件没传 | 确认 Dashboard 卡片 URL；确认 `/config/www/lovehome/` 下有 index.html |
+| **Supervisor 提示「无效的加载项仓库」** | 仓库根缺 `repository.yaml` | 用最新代码，`repository.yaml` 已在仓库根目录 |
+| **Add-on 构建失败 / 卡住** | 拉基础镜像或 Alpine 包慢、网络不通 | 给 HA 配 Docker 镜像加速；看「加载项 → 日志」的具体报错 |
+| **Add-on 启动后侧边栏没入口** | Ingress 面板未注册 / 缓存 | 重启加载项；清浏览器缓存；或从「加载项 → QLovehome → 打开 WEB UI」进入 |
+| 侧边栏没出现 QLovehome（集成模式） | panel 注册可能失败（非致命） | Dashboard 手动加 iframe 卡片 → `/qlovehome/www/index.html` |
+| 页面空白 | iframe 地址写错 / 文件没传 | 确认 Dashboard 卡片 URL；确认 `/config/www/qlovehome/` 下有 index.html |
 | 全是「—」 | 实体 ID 没换成你的 | 打开开发者工具 → 控制台输 `LH.rooms.map(r=>r.lxs)` 看实际读的是什么 |
 | 图标有但点不动 | 该设备的 HA 服务不存在 | HA → **开发者工具 → 服务** → 搜该设备 → 手动触发试试 |
 | 改了没生效 | 浏览器缓存 | `?v=N` 加 1；还不行 Ctrl+Shift+R 硬刷新 |
@@ -314,7 +322,8 @@ python gen_lovehome_data.py
 LH.rooms           // 查看所有房间数据
 LH.plan            // 查看户型参数
 LH.overview        // 查看概览配置
-localStorage        // 查看本地存储（待机时间、主题、标签位置）
+LH.version         // 当前版本号（来自 manifest.json）
+localStorage        // 只看启动缓存（真实配置在服务器）
 ```
 
 ---
@@ -322,32 +331,43 @@ localStorage        // 查看本地存储（待机时间、主题、标签位置
 ## 目录结构速查（用户版 zip）
 
 ```
-QLoveHome-v1.1.0/
-├── custom_components/lovehome/          # ← 复制到 /config/custom_components/
+QLovehome-v1.4.1/
+├── repository.yaml                       # ← Supervisor 加载项仓库标识（必须在根）
+├── hacs.json                             # HACS 集成元信息
+│
+├── qlovehome_addon/                      # ⭐ HAOS 加载项（推荐）
+│   ├── config.yaml                       #   加载项元数据（slug / ingress / arch）
+│   ├── Dockerfile
+│   ├── run.sh
+│   ├── server/                           #   独立 Python 后端
+│   │   ├── app.py · ha.py · store.py · timer.py · __main__.py
+│   │   └── manifest.json                 #   版本号来源
+│   └── www/                              #   前端静态文件
+│       ├── index.html
+│       ├── qlovehome.js
+│       ├── qlovehome-editor.js
+│       ├── qlovehome.css
+│       ├── qlovehome-data.js
+│       ├── QLovehome.png
+│       └── assets/{bg-day.jpg, bg-night.jpg, plan-real.jpg}
+│
+├── custom_components/qlovehome/          # HACS 集成（备选）→ 复制到 /config/custom_components/
 │   ├── __init__.py
 │   ├── config_flow.py
 │   ├── const.py
 │   ├── manifest.json
+│   ├── brand/{icon.png, icon@2x.png}      #   HACS brands 校验用
 │   ├── strings.json
 │   ├── translations/{en.json, zh-Hans.json}
-│   └── www/                              # ← 已经包含在集成里，部署时自动加载
-│       ├── index.html
-│       ├── lovehome.js
-│       ├── lovehome-editor.js
-│       ├── lovehome.css
-│       ├── lovehome-data.js
-│       ├── QLovehome.png
-│       └── assets/{bg-day.jpg, bg-night.jpg, plan-real.jpg}
+│   └── www/                              #   前端静态文件（和 addon/www 同步）
 │
-├── gen_lovehome_data.py                  # ⭐ 改这个接你的设备
-├── hacs.json
 ├── info.md
 ├── README.md
 ├── USER_GUIDE.md                         # 本文件
 └── LICENSE
 ```
 
-`lovehome/` 源码头、`rooms_poly.json`、`optional-patches/` 都在 GitHub 仓库里，用户版 zip 不包含——但这些对**运行**不是必需的。
+`gen_qlovehome_data.py`、`extract_rooms.py`、`calib_real.py`、`rooms_poly.json`、`optional-patches/` 只在 GitHub 仓库里（`.hacsignore` 已排除），发布包不含——这些对**运行**不是必需的。
 
 ---
 

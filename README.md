@@ -7,7 +7,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/MisiteQ/QLovehome.svg)](https://github.com/MisiteQ/QLovehome/stargazers)
 
 面向门口 / 客厅平板的 **Home Assistant 全屋大屏面板**。
-纯 iframe 嵌入，零 YAML，零 Webpack——HTML + SVG + JS，源码可读可改。
+可作为 **HAOS 加载项（Add-on）** 或 **HACS 集成** 安装，零 YAML，零 Webpack——HTML + SVG + JS，源码可读可改。
 
 ---
 
@@ -34,11 +34,14 @@ QLovehome（**其爱家** 哈哈哈）是怎么来的？
 | 模块 | 说明 |
 |---|---|
 | 🏠 **户型图** | 矢量 SVG，矩形 / 多边形 / 圆形房间，墙体自动融合一体 |
-| 🎛️ **中控** | 灯光 · 插座 · 空调 · 风扇 · 窗帘统一开关 + 调光调色温 |
-| 📊 **概览** | 家人在线 · 用电 · 安防 · 温湿度 · 电池 · 摄像头 · 网络 |
+| 🎛️ **中控** | 灯光 · 插座 · 空调（含**扫风模式**）· 风扇 · 窗帘统一开关 + 调光调色温 |
+| 📊 **概览** | 家人在线 · 用电 · 安防 · 温湿度 · 电池 · 摄像头 · 网络 · 天气 |
+| 📝 **最近动态** | 自动记录设备操控 · 定时设置 · 定时到点执行，JSONL 存服务器，可按事件类型筛选 |
+| ⏱️ **定时 / 倒计时** | 服务器端调度，关面板 / 退出账号也照跑，HA 重启自动恢复；支持手动输入分钟数 |
+| 🔌 **子设备绑定** | 热水器绑水量传感器、灯绑子灯组，子设备自动从户型图剔除 |
 | 🎨 **主题** | 深/浅色跟随日出日落 · 四季配色自动切换 · 房间色块温度感知 |
 | 😴 **屏保** | 无操作自动进待机大屏时钟 · 待机时间可配置 |
-| 🛠️ **编辑器** | 可视化画户型 · 空格平移画布 · 滚轮缩放 · 拖房间名字定位 |
+| 🛠️ **编辑器** | 可视化画户型 · 从 HA 批量导入实体 · 空格平移画布 · 滚轮缩放 · 拖房间名字定位 |
 | 🔧 **个性化** | 字体大小 · 面板透明度 · 主题深浅 · 待机时间 · **全部存 HA 服务器**（换电脑/换浏览器不丢） |
 
 ---
@@ -70,7 +73,7 @@ URL：
 https://github.com/MisiteQ/QLovehome
 ```
 
-类别选：**Home Assistant** → 添加 → 列表里找到 **QLovehome** → **安装**
+点 **添加**（仓库根目录的 `repository.yaml` 会被自动识别）→ 列表里找到 **QLovehome** → **安装**
 
 - Supervisor 自动构建（首次约 3-5 分钟）
 - 安装完成后侧边栏自动出现 **QLovehome**
@@ -113,7 +116,7 @@ Dashboard → 网页卡片（iframe）→ 地址：
 
 **不用改任何 Python 脚本！**
 
-1. 主界面 → 设置 → 打开编辑器 → **设备 tab**
+1. 主界面**左下角铅笔图标** → 进入编辑器 → **设备 tab**
 2. 点 **🔍 从 HA 批量导入**
 3. 弹窗里按 domain 分组列出你 HA 里所有控制类实体（灯 / 开关 / 空调 / 窗帘 / 风扇 / 影音 / 门锁 / 摄像头...）
 4. 勾选你家的设备 → 点「导入 →」
@@ -141,9 +144,11 @@ python gen_qlovehome_data.py
 
 | 方式 | 怎么做 | 适合 |
 |---|---|---|
-| A. 直接用模板 | 什么都不改 | 先看效果 |
-| B. 现实风照片底板 | 照片存 `assets/plan-real.jpg`，跑 `python calib_real.py` | 想让照片当底板 |
+| ⭐ **A. 编辑器直接画** | 编辑器 → 户型 tab → 矩形 / 圆形 / 多边形工具直接绘制，拖拽调整 | **绝大多数人，推荐** |
+| B. 现实风照片底板 | 照片存 `www/assets/plan-real.jpg`，跑 `python calib_real.py` | 想让照片当底板 |
 | C. 重新提取多边形 | `python extract_rooms.py 标注图.png 户型图.png` | 户型完全不同 |
+
+> ⚠️ B / C 需要仓库里的 Python 脚本，**HACS 发布包里不含**（见 `.hacsignore`）。想用就从 GitHub 克隆仓库，或直接用方式 A 在编辑器里画。
 
 `rooms_poly.json` 是**唯一几何源头**——墙体、房间色块、标签位置全由它推导。
 
@@ -178,7 +183,6 @@ QLovehome/
 │   ├── config.yaml                   #   Add-on 元数据（slug/ingress/架构）
 │   ├── Dockerfile                    #   HA 基础镜像 + Alpine 预编译 aiohttp
 │   ├── run.sh                        #   入口脚本（bashio 自动注入环境变量）
-│   ├── repository.yaml               #   Add-on 仓库描述
 │   ├── README.md                     #   Add-on 专用说明页
 │   ├── www/                          #   前端静态文件（自包含）
 │   │   ├── index.html · qlovehome.js · qlovehome-editor.js
@@ -189,13 +193,18 @@ QLovehome/
 │       ├── app.py                    #     REST API + 静态文件托管
 │       ├── ha.py                     #     HA WebSocket 连接层
 │       ├── store.py                  #     配置 / 审计日志 / 版本持久化
-│       └── timer.py                  #     独立 asyncio 定时调度
+│       ├── timer.py                  #     独立 asyncio 定时调度
+│       └── manifest.json             #     版本号来源（Dockerfile 拷进容器）
+│
+├── repository.yaml                   # ⚠️ 必须在仓库根，Supervisor 靠它识别加载项仓库
 │
 ├── custom_components/qlovehome/       # ⭐ HA Integration（备选，和 Add-on 共用前端）
 │   ├── __init__.py                    #   integration 注册 + WS/REST API
 │   ├── config_flow.py                 #   HA 配置向导
 │   ├── const.py                       #   常量
 │   ├── manifest.json                  #   集成元信息（version / domain）
+│   ├── brand/                         #   HACS brands 校验用图标
+│   │   ├── icon.png (256×256) · icon@2x.png (512×512)
 │   ├── strings.json
 │   ├── translations/
 │   └── www/                           #   前端静态文件（和 Add-on/www/ 同步）
@@ -218,13 +227,14 @@ QLovehome/
 ## 🛠️ 开发
 
 ```bash
-# 本地静态服务器
+# 本地静态服务器（改前端时预览）
 py -m http.server 8765 --directory qlovehome/
 
-# 改完同步到 custom_components
-copy qlovehome\. custom_components\qlovehome\www\ -Recurse
+# 改完要同步到 3 个位置（前端代码三份副本保持一致）
+Copy-Item qlovehome\qlovehome.js,qlovehome\qlovehome-editor.js,qlovehome\qlovehome.css,qlovehome\qlovehome-data.js,qlovehome\index.html custom_components\qlovehome\www\ -Force
+Copy-Item qlovehome\*.js,qlovehome\*.css,qlovehome\index.html qlovehome_addon\www\ -Force
 
-# CI 自动校验：Python 语法 · JS 语法 · manifest.json · HACS Action
+# CI 自动校验：HACS validation · Python 语法 · JS 语法 · manifest.json
 ```
 
 ### 核心几何算法
@@ -244,8 +254,10 @@ copy qlovehome\. custom_components\qlovehome\www\ -Recurse
 
 | 现象 | 原因 | 解决 |
 |---|---|---|
-| 🆕 **Error setting up entry for qlovehome** | v1.0.0 的 panel_custom API 签名在 HA 2024.6+ 不兼容 | 升级到 **v1.0.1**（已修复） |
-| 侧边栏没出现 QLovehome | panel 注册可能失败 | Dashboard 手动加 iframe 卡片 → `/qlovehome/www/index.html` |
+| **Supervisor 添加仓库提示「无效的加载项仓库」** | 仓库里找不到根级 `repository.yaml` | 用最新代码（`repository.yaml` 已移到仓库根目录） |
+| **Add-on 安装卡在构建 / 构建失败** | 首次构建需拉 HA 基础镜像 + Alpine 包，网络慢 | 换 HA 的 Docker 镜像源后重试；看「加载项 → QLovehome → 日志」具体报错 |
+| **Add-on 启动后侧边栏没出现** | Ingress 面板未注册 / 浏览器缓存 | 重启加载项；清缓存；或直接访问 `http://<ha-ip>:8123/api/hassio_ingress/` 下对应链接 |
+| 侧边栏没出现 QLovehome（集成模式） | panel 注册可能失败 | Dashboard 手动加 iframe 卡片 → `/qlovehome/www/index.html` |
 | 页面空白 | iframe 地址错 / 文件没传 / `?v=N` 没加 | 确认 Dashboard 卡片 URL；确认 `/config/www/qlovehome/` 下有 index.html |
 | 全是「—」 | 实体 ID 没换成你的 | 打开开发者工具 → 控制台输 `LH.rooms.map(r=>r.lxs)` 看实际读的是什么 |
 | 图标有但点不动 | 该设备的 HA 服务不存在 | HA → **开发者工具 → 服务** → 搜该设备 → 手动触发试试 |
@@ -253,6 +265,7 @@ copy qlovehome\. custom_components\qlovehome\www\ -Recurse
 | 手机侧栏不见 | 正常：≤900px 窄屏模式自动隐藏 | |
 | 墙体太厚 | `LH.plan.wallW` 默认 3px | 编辑器里改房间形状后重新生成，或 Console 输 `LH.plan.wallW=10` |
 | 待机时间想调 | 设置面板 | 设置 → 待机时间面板 |
+| 体感温度显示 `≈` | 该天气实体没提供 `apparent_temperature`，用的是公式估算 | 换和风 / OWM / AccuWeather 等自带体感的集成，或忽略 |
 
 ---
 
@@ -260,6 +273,7 @@ copy qlovehome\. custom_components\qlovehome\www\ -Recurse
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| **v1.4.1** | 2026-10-29 | 🔧 **加载项安装修复**：`repository.yaml` 移到仓库根（否则 Supervisor 提示「无效的加载项仓库」）；移除 `config.yaml` 里的 `image:` 字段（无预构建镜像，改为 Supervisor 本地构建）；补 `web.get("/")` 根路由，修复 Ingress 面板打开显示 404；🧩 补齐 HACS brands 图标（`brand/icon.png` + `icon@2x.png`），CI 10/10 通过；📚 README / USER_GUIDE / info.md / 加载项 README 全面校对（修正遗留 `lovehome` 旧命名、`gen_qlovehome_data.py` 文件名、路径、localStorage 过时描述等） |
 | **v1.4.0** | 2026-10-28 | ⭐ **新增 HAOS Add-on 模式**（独立 Python 进程 + HA WebSocket 连接 + Ingress 侧边栏，自包含 `qlovehome_addon/` 目录）；🗂️ 设备操控统一走后端 `/api/qlh/service`（两种模式都带审计日志），失败才回落直接 `hass.callService()`；📝 新增 **最近动态** 面板（底部 tab 栏，自动记录设备操控、定时设置、定时到点执行，JSONL 存服务器，支持事件类型筛选）；🔌 子设备绑定（热水器绑水量传感器、灯绑子灯组等，编辑器里可添加，子设备自动从户型图剔除）；❄️ 空调面板新增 **扫风模式**（读 `swing_modes` 属性，有才显示按钮）；🏷️ 版本号改从 `manifest.json` 动态读取，关于页面实时跟随更新 |
 | **v1.3.4** | 2026-10-28 | 🏠 默认模板补上**过道 + 卫生间**（6 个房间铺满画布，每房一盏示例灯）；🐛 修复 HA 顶栏隐藏时报 `getElementById is not a function`（逐层扫描 shadow root 时对 Document 兼容取样式节点）；🩹 服务器配置只剩 `timers` 段时不再被误判为「已配置」，可正常回落到默认模板 |
 | **v1.3.3** | 2026-10-28 | 🏠 默认模板改为**4 个房间铺满画布 + 每房一盏灯**（移除原来开发者自带的户型）；🪟 修复隐藏 HA 顶栏按钮无效（兼容 Lovelace `.header` 与新版 `ha-top-app-bar`，逐层注入 shadow DOM） |

@@ -9,6 +9,7 @@ photo_outline.json
 missing_ents.json
 templates.yaml
 qlovehome/
+qlovehome_addon/
 .github/
 .gitignore
 screenshots/

@@ -41,12 +41,22 @@ def create_app() -> web.Application:
         web.delete("/api/qlh/timer",        handle_delete_timer),
         web.get("/api/qlh/audit",           handle_get_audit),
         web.post("/api/qlh/service",        handle_service_call),
+        # 根路径返回 index.html（HA Ingress 面板打开的是 "/"，不带 index.html）
+        web.get("/", handle_index),
         # 静态文件（前端 www/ 目录）
         web.static("/", str(STATIC_DIR), show_index=False, follow_symlinks=True),
     ])
     app.on_startup.append(_on_startup)
     app.on_cleanup.append(_on_cleanup)
     return app
+
+
+async def handle_index(request: web.Request) -> web.StreamResponse:
+    """HA 侧边栏 Ingress 打开的是 / 根路径，直接吐 index.html。"""
+    index = STATIC_DIR / "index.html"
+    if not index.exists():
+        return web.Response(status=404, text="index.html 不存在，请检查镜像内 /app/www 是否完整")
+    return web.FileResponse(index)
 
 
 async def _on_startup(app: web.Application) -> None:
