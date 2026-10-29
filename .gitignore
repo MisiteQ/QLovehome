@@ -24,6 +24,7 @@ dist/
 
 # 打包产物（本地分发用，不进仓库）
 release/
+*.zip
 
 # 运行时生成的用户配置（不进仓库）
 custom_components/qlovehome/qlh/
