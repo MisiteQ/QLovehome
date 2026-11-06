@@ -1,6 +1,6 @@
 # QLoveHome · 使用帮助（详细版）
 
-> **适用版本**：v1.4.3  
+> **适用版本**：v1.4.4  
 > **适用人群**：Home Assistant 2025.1+ / HAOS 用户（已在 Core 2026.11 上验证）  
 > **前置条件**：已安装 Home Assistant，有一台平板（门口 / 客厅常亮）
 
@@ -331,7 +331,7 @@ localStorage        // 只看启动缓存（真实配置在服务器）
 ## 目录结构速查（用户版 zip）
 
 ```
-QLovehome-v1.4.3/
+QLovehome-v1.4.4/                        # 注意：zip 内没有这一层，以下是解压后的完整包结构
 ├── repository.yaml                       # ← Supervisor 加载项仓库标识（必须在根）
 ├── hacs.json                             # HACS 集成元信息
 │
