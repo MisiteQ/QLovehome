@@ -6393,7 +6393,8 @@
      不同版本、不同打开方式都不一样 —— 所以扫描所有能碰到的根节点，每个都注入一遍。
      根节点列表缓存 4 秒，避免 2 秒轮询时反复扫整棵 HA DOM。 */
   const HA_SHELL_TAGS = 'home-assistant, home-assistant-main, ha-drawer, ha-sidebar, ' +
-    'ha-panel-lovelace, hui-root, ha-top-app-bar, ha-panel-iframe, ha-panel-custom';
+    'ha-panel-lovelace, hui-root, ha-top-app-bar, ha-panel-iframe, ha-panel-custom, ' +
+    'hass-subpage, ha-panel-app';
   let haRootCache = null, haRootAt = 0;
   function haRoots() {
     const now = Date.now();
@@ -6445,12 +6446,26 @@
     const topCss = '.header{display:none !important}' +
       'ha-top-app-bar{display:none !important}' +
       'app-header{display:none !important}';
+    /* ha-panel-app（加载项 Ingress）的 iframe 高度写死了 100% - 40px，藏了 header 也要补回这 40px */
     const padCss = '.app-content{padding-top:0 !important}' +
-      'hui-view-container{padding-top:0 !important}';
+      'hui-view-container{padding-top:0 !important}' +
+      '.header+iframe{height:100% !important}';
     const hideTop = p.haTop === false;
     haRoots().forEach((root) => {
       haInject(root, 'lh-ha-top-css', topCss, hideTop);
       haInject(root, 'lh-ha-top-pad', padCss, hideTop);
+    });
+    /* 集成面板（frontend 的 iframe 面板）外面包的是 <hass-subpage>：那条白底标题栏是
+       它 shadowRoot 里的 .toolbar（不是 .header），只往上层根节点注入根本碰不到。
+       而且 .content 的高度写死了 calc(100% - header)，单藏 .toolbar 会在底部留出空白。 */
+    haRoots().forEach((root) => {
+      if (!root.querySelectorAll) return;
+      Array.prototype.forEach.call(root.querySelectorAll('hass-subpage'), (sp) => {
+        if (!sp.shadowRoot) return;
+        haInject(sp.shadowRoot, 'lh-subpage-top',
+          '.toolbar{display:none !important}' +
+          '.content{height:100% !important}', hideTop);
+      });
     });
     const h = haShell();
     if (!h) return false;

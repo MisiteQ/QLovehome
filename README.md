@@ -274,6 +274,7 @@ pwsh -File scripts/sync-www.ps1
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| **v1.4.7** | 2026-11-06 | 🐛 **修复「顶部白条（QLovehome 标题栏）藏不掉」**：集成面板由 Home Assistant 的 `<hass-subpage>` 包着，那条白底标题栏是它 shadow DOM 里的 `.toolbar`（不是 `.header`），原先的样式注入既没扫 `hass-subpage` 这个标签、也没写 `.toolbar` 选择器，所以「隐藏 HA 顶栏」按钮和全屏联动都无效。现在把 `hass-subpage` / `ha-panel-app` 加入扫描列表，并把 `.toolbar` 藏掉的同时把 `.content` 高度补回 100%（否则底部会留 56px 空白） |
 | **v1.4.6** | 2026-11-06 | 🐛 **修复发布包 zip 路径分隔符错误**（v1.4.4/v1.4.5 的包都有这个问题）：.NET Framework 的 `Compress-Archive` / `ZipFile.CreateFromDirectory` 会把目录分隔符写成反斜杠 `\`，在 Linux 上解压后 `www\index.html` 变成一个**文件名**而不是 `www/` 目录，集成找不到前端文件 → 静态目录注册失败 → 面板 iframe 404 → HA 回落到自己的界面 → 又是无限套娃。`scripts/package.ps1` 改为手工写 zip 条目并强制正斜杠，打包时自检：出现反斜杠条目直接失败退出 |
 | **v1.4.5** | 2026-11-06 | 🐛 **修复「打开后 HA 无限套娃」**：前端静态目录原先挂在 `/qlovehome/www`，正好在侧边栏面板路径 `/qlovehome` 之下，访问静态页时被面板路由先命中，面板就在自己的 iframe 里再加载一次自己。现已改为 `/qlh/www`（与面板路径无关），并加了防呆检查——以后谁再把静态目录挂到面板路径下面会直接报错跳过。文档里的手动 iframe 地址同步改为 `/qlh/www/index.html`（复制到 www 目录的场景是 `/local/qlh/index.html`） |
 | **v1.4.4** | 2026-11-06 | 📦 **修复发布包结构**：原先 zip 多包了一层 `QLovehome-vX.Y.Z/`，导致 `manifest.json` 落在第 3 层，冬瓜 HAOS 伴侣这类「从压缩包安装集成」的工具报「压缩包中未找到 manifest.json」。现在同时发布两种布局——`QLovehome-integration-vX.Y.Z.zip`（首层即 `manifest.json`，供此类工具）与 `QLovehome-vX.Y.Z.zip`（首层为 `custom_components/`，完整包）；新增 `scripts/package.ps1` 统一打包，避免手工压缩再次出错。集成代码与 v1.4.3 完全一致 |

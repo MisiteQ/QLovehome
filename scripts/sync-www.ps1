@@ -1,4 +1,4 @@
-# QLovehome · 前端同步脚本
+﻿# QLovehome · 前端同步脚本
 #
 # qlovehome/ 是唯一的前端源码目录，发布时用这个脚本同步到两个后端：
 #   custom_components/qlovehome/www/   ← HACS 集成（集成模式）
