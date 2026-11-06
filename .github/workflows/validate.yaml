@@ -59,6 +59,9 @@ jobs:
             echo "ok $f"
           done
 
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
       - name: JSON / YAML validation
         run: |
           python3 - <<'PY'
