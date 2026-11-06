@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -41,12 +42,12 @@ def read_version() -> str:
         ]:
             if candidate.exists():
                 data = json.loads(candidate.read_text(encoding="utf-8"))
-                v = str(data.get("version", "1.4.1"))
+                v = str(data.get("version", "1.4.3"))
                 _VERSION_CACHE = v
                 return v
     except (OSError, ValueError):
         pass
-    _VERSION_CACHE = "1.4.1"
+    _VERSION_CACHE = "1.4.3"
     return _VERSION_CACHE
 
 
@@ -68,13 +69,14 @@ def read_config() -> dict:
 
 def write_config(data: dict) -> None:
     text = json.dumps(data, ensure_ascii=False, indent=2)
-    try:
-        _ensure_parent(CONFIG_FILE)
-        tmp = CONFIG_FILE.with_suffix(".json.tmp")
-        tmp.write_text(text, encoding="utf-8")
-        tmp.replace(CONFIG_FILE)
-    except OSError:
-        log.exception("写入配置失败: %s", CONFIG_FILE)
+    with _LOCK:
+        try:
+            _ensure_parent(CONFIG_FILE)
+            tmp = CONFIG_FILE.with_suffix(".json.tmp")
+            tmp.write_text(text, encoding="utf-8")
+            tmp.replace(CONFIG_FILE)
+        except OSError:
+            log.exception("写入配置失败: %s", CONFIG_FILE)
 
 
 def read_ui() -> dict:
@@ -82,14 +84,20 @@ def read_ui() -> dict:
     return ui if isinstance(ui, dict) else {}
 
 
+# 配置文件的读-改-写锁：HTTP 请求处理是并发的，save_config / save_ui / set_timer
+# 会同时「读-改-写」同一个 JSON，没有锁时后写入的会把另一份改动整个盖掉
+_LOCK = threading.RLock()
+
+
 def write_ui(ui: dict) -> dict:
-    data = read_config()
-    merged = data.get("ui")
-    merged = merged if isinstance(merged, dict) else {}
-    merged.update(ui or {})
-    data["ui"] = merged
-    write_config(data)
-    return merged
+    with _LOCK:
+        data = read_config()
+        merged = data.get("ui")
+        merged = merged if isinstance(merged, dict) else {}
+        merged.update(ui or {})
+        data["ui"] = merged
+        write_config(data)
+        return merged
 
 
 def read_timers() -> dict:
@@ -98,20 +106,34 @@ def read_timers() -> dict:
 
 
 def write_timers(timers: dict) -> dict:
-    data = read_config()
-    data["timers"] = timers
-    write_config(data)
-    return timers
+    with _LOCK:
+        data = read_config()
+        data["timers"] = timers
+        write_config(data)
+        return timers
 
 
-def save_config_keep_timers(cfg: dict) -> dict:
+def save_config_keep_runtime(cfg: dict) -> dict:
+    """整份保存配置时，服务器上的「运行时段」以实时值为准.
+
+    timers 只由 /api/qlh/timer 修改、ui 只由 /api/qlh/ui 修改；
+    前端保存户型时可能带着旧快照，直接照抄会把它们丢掉。
+    """
     merged = dict(cfg)
-    old = read_config().get("timers")
-    if isinstance(old, dict) and old:
-        merged["timers"] = old
-    else:
-        merged.pop("timers", None)
+    old = read_config()
+    for key in ("timers", "ui"):
+        value = old.get(key)
+        if value is not None:
+            merged[key] = value
+        else:
+            merged.pop(key, None)
     return merged
+
+
+def save_config_file(cfg: dict) -> None:
+    """整份保存配置：保留运行时段 + 写入，整段在同一把锁里完成."""
+    with _LOCK:
+        write_config(save_config_keep_runtime(cfg))
 
 
 # ── 审计日志 ────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 name: QLovehome
-version: "1.4.1"
+version: "1.4.3"
 slug: qlovehome
 description: "全屋大屏家庭仪表盘：户型图 + 房间温湿度 + 灯光中控 + 安防状态 + 家电汇总。内嵌于 Home Assistant 侧边栏，自动连接本机 HA，无需手动配置令牌。"
 url: https://github.com/MisiteQ/QLovehome
@@ -13,9 +13,11 @@ ingress: true
 ingress_port: 8765
 panel_icon: mdi:home-heart
 panel_title: QLovehome
+panel_admin: false
+watchdog: "http://[HOST]:[PORT:8765]/api/qlh/health"
 ports:
   8765/tcp: null
 ports_description:
-  8765/tcp: 独立访问端口（可选；一般用侧边栏 Ingress 即可，无需开启）
+  8765/tcp: 独立访问端口（可选；默认只允许 Ingress 与本机访问，直连需设置 QLH_API_TOKEN）
 options: {}
 schema: {}

@@ -13,26 +13,89 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: HACS validation
         uses: hacs/action@main
         with:
           category: integration
 
-      - name: Python syntax check
+      - name: Python syntax check (integration + add-on)
         run: |
-          python3 -m py_compile gen_qlovehome_data.py || true
-          python3 -m py_compile extract_rooms.py || true
-          python3 -m py_compile calib_real.py || true
           python3 -m py_compile custom_components/qlovehome/__init__.py
           python3 -m py_compile custom_components/qlovehome/config_flow.py
           python3 -m py_compile custom_components/qlovehome/const.py
+          python3 -m py_compile qlovehome_addon/server/__init__.py
+          python3 -m py_compile qlovehome_addon/server/__main__.py
+          python3 -m py_compile qlovehome_addon/server/app.py
+          python3 -m py_compile qlovehome_addon/server/ha.py
+          python3 -m py_compile qlovehome_addon/server/store.py
+          python3 -m py_compile qlovehome_addon/server/timer.py
+          # 开发脚本：语法错同样应该拦住
+          python3 -m py_compile gen_qlovehome_data.py
+          python3 -m py_compile extract_rooms.py
+          python3 -m py_compile calib_real.py
 
-      - name: JS syntax check
+      - name: JS syntax check (source + both published copies)
         run: |
-          node --check qlovehome/qlovehome.js
-          node --check qlovehome/qlovehome-editor.js
+          for f in qlovehome/qlovehome.js qlovehome/qlovehome-editor.js \
+                   custom_components/qlovehome/www/qlovehome.js \
+                   custom_components/qlovehome/www/qlovehome-editor.js \
+                   qlovehome_addon/www/qlovehome.js \
+                   qlovehome_addon/www/qlovehome-editor.js; do
+            echo "check $f"
+            node --check "$f"
+          done
 
-      - name: manifest.json validation
+      - name: Frontend copies must be identical
         run: |
-          python3 -c "import json; json.load(open('custom_components/qlovehome/manifest.json'))"
-          python3 -c "import json; json.load(open('hacs.json'))"
+          set -e
+          for f in index.html qlovehome.js qlovehome-editor.js qlovehome.css qlovehome-data.js; do
+            cmp "qlovehome/$f" "custom_components/qlovehome/www/$f"
+            cmp "qlovehome/$f" "qlovehome_addon/www/$f"
+            echo "ok $f"
+          done
+
+      - name: JSON / YAML validation
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          bad = []
+          for p in pathlib.Path('.').rglob('*.json'):
+              if any(x in p.parts for x in ('node_modules', '.git')):
+                  continue
+              try:
+                  json.loads(p.read_text(encoding='utf-8'))
+              except Exception as exc:
+                  bad.append(f'{p}: {exc}')
+          for p in pathlib.Path('.').rglob('*.yaml'):
+              if any(x in p.parts for x in ('node_modules', '.git')):
+                  continue
+              try:
+                  import yaml
+                  yaml.safe_load(p.read_text(encoding='utf-8'))
+              except Exception as exc:
+                  bad.append(f'{p}: {exc}')
+          if bad:
+              print('\n'.join(bad)); sys.exit(1)
+          print('json/yaml ok')
+          PY
+
+      - name: Version must match everywhere
+        run: |
+          python3 - <<'PY'
+          import json, re, sys, pathlib
+          ver = json.loads(pathlib.Path('custom_components/qlovehome/manifest.json').read_text())['version']
+          addon = pathlib.Path('qlovehome_addon/config.yaml').read_text()
+          m = re.search(r'^version:\s*"?([^"\n]+)"?', addon, re.M)
+          server = json.loads(pathlib.Path('qlovehome_addon/server/manifest.json').read_text())['version']
+          errs = []
+          if not m or m.group(1).strip() != ver: errs.append(f'config.yaml={m.group(1) if m else None} != {ver}')
+          if server != ver: errs.append(f'server/manifest.json={server} != {ver}')
+          if errs:
+              print('\n'.join(errs)); sys.exit(1)
+          print('version', ver, 'ok')
+          PY

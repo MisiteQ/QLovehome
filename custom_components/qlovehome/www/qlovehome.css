@@ -2506,3 +2506,12 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 }
 .audit-refresh:hover { background: rgba(255,255,255,.12); color: var(--fg); }
 .audit-refresh:active { transform: rotate(180deg); }
+
+/* ── 触摸屏（壁挂平板）───────────────────────────────────────
+   画房间 / 拖设备 / 拖房间名：浏览器默认会把手指移动解释成滚动或缩放，
+   不声明 touch-action: none 的话 pointermove 在第一次移动后就被取消，
+   表现就是"按住拖不动"。 */
+.lh-ed-plan-canvas,
+.lh-ed-plan-svg,
+.room-label,
+.marker { touch-action: none; }

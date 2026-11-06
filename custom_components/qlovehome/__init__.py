@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -54,6 +55,7 @@ from .const import (
     TIMER_CATCHUP_SECONDS,
     TIMER_EVENT,
     TIMER_KEY,
+    UI_KEY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -144,11 +146,19 @@ def _audit_write(event: str, **detail) -> None:
         _LOGGER.exception("写入审计日志失败")
 
 
+def _coerce_limit(value, default: int = 50) -> int:
+    """把前端传进来的 limit 安全转成 int（乱传字符串不该让接口 500）."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _audit_read_recent(limit: int, event: str | None = None) -> list[dict]:
     """逆序读取审计日志，返回最近 N 条（可选按 event 过滤）."""
     limit = min(max(limit, 1), AUDIT_MAX_ENTRIES)
     result: list[dict] = []
-    for log_file in (_audit_path(), _audit_path().with_suffix(AUDIT_FILE + ".1")):
+    for log_file in (_audit_path(), _audit_path().with_name(AUDIT_FILE + ".1")):
         if not log_file.exists():
             continue
         try:
@@ -209,17 +219,34 @@ def _read(hass: HomeAssistant) -> dict:
 
 
 def _write(hass: HomeAssistant, data: dict) -> None:
-    """写集成目录（主）+ /config/qlh（镜像，升级不丢）."""
+    """写集成目录（主）+ /config/qlh（镜像，升级不丢）.
+
+    ★ 加锁：save_config 与 save_ui 会并发「读-改-写」同一个文件，
+      没有锁时后写入的那一份会把另一份的改动整个盖掉。
+    """
     text = json.dumps(data, ensure_ascii=False, indent=2)
-    for path in (_data_path(), _mirror_path(hass)):
-        try:
-            _ensure_parent(path)
-            tmp = path.with_suffix(".json.tmp")
-            tmp.write_text(text, encoding="utf-8")
-            tmp.replace(path)
-        except OSError:
-            _LOGGER.exception("写入 QLovehome 配置失败: %s", path)
+    with _SAVE_LOCK:
+        for path in (_data_path(), _mirror_path(hass)):
+            try:
+                _ensure_parent(path)
+                tmp = path.with_suffix(".json.tmp")
+                tmp.write_text(text, encoding="utf-8")
+                tmp.replace(path)
+            except OSError:
+                _LOGGER.exception("写入 QLovehome 配置失败: %s", path)
     _LOGGER.debug("QLovehome 配置已保存")
+
+
+def _write_ui(hass: HomeAssistant, ui: dict) -> dict:
+    """只更新 ui 段，其它配置原样保留（避免和编辑器互相覆盖）."""
+    with _SAVE_LOCK:
+        data = _read(hass)
+        merged = data.get("ui")
+        merged = merged if isinstance(merged, dict) else {}
+        merged.update(ui or {})
+        data["ui"] = merged
+        _write(hass, data)
+        return merged
 
 
 def _read_ui(hass: HomeAssistant) -> dict:
@@ -227,15 +254,8 @@ def _read_ui(hass: HomeAssistant) -> dict:
     return ui if isinstance(ui, dict) else {}
 
 
-def _write_ui(hass: HomeAssistant, ui: dict) -> dict:
-    """只更新 ui 段，其它配置原样保留（避免和编辑器互相覆盖）."""
-    data = _read(hass)
-    merged = data.get("ui")
-    merged = merged if isinstance(merged, dict) else {}
-    merged.update(ui or {})
-    data["ui"] = merged
-    _write(hass, data)
-    return merged
+# 配置文件的读-改-写锁（save_config / save_ui / set_timer 会并发进来）
+_SAVE_LOCK = threading.RLock()
 
 
 # ── 定时 / 倒计时持久化 ─────────────────────────────────────
@@ -247,25 +267,35 @@ def _read_timers(hass: HomeAssistant) -> dict:
 
 
 def _write_timers(hass: HomeAssistant, timers: dict) -> dict:
-    data = _read(hass)
-    data[TIMER_KEY] = timers
-    _write(hass, data)
-    return timers
+    with _SAVE_LOCK:
+        data = _read(hass)
+        data[TIMER_KEY] = timers
+        _write(hass, data)
+        return timers
 
 
-def _save_config_keep_timers(hass: HomeAssistant, cfg: dict) -> dict:
-    """整份保存配置时，timers 段一律以服务器上的实时值为准.
+def _save_config_keep_runtime(hass: HomeAssistant, cfg: dict) -> dict:
+    """整份保存配置时，服务器上的「运行时段」一律以实时值为准.
 
-    定时只通过 set_timer / clear_timer 修改；前端保存配置时可能带着一份旧快照，
-    直接照抄会把新设的定时丢掉、或把已执行的又写回来。
+    - timers：只由 set_timer / clear_timer 修改
+    - ui：只由 save_ui 修改（主题 / 字号 / 待机 …）
+    前端保存户型时可能带着一份旧快照（或不带这两段），直接照抄会把它们丢掉。
     """
     merged = dict(cfg)
-    old = _read(hass).get(TIMER_KEY)
-    if isinstance(old, dict) and old:
-        merged[TIMER_KEY] = old
-    else:
-        merged.pop(TIMER_KEY, None)
+    old = _read(hass)
+    for key in (TIMER_KEY, UI_KEY):
+        value = old.get(key)
+        if value is not None:
+            merged[key] = value
+        else:
+            merged.pop(key, None)
     return merged
+
+
+def _save_config_file(hass: HomeAssistant, cfg: dict) -> None:
+    """整份保存配置：保留运行时段 + 写入，整段在同一把锁里完成."""
+    with _SAVE_LOCK:
+        _write(hass, _save_config_keep_runtime(hass, cfg))
 
 
 # ── 装机流程 ────────────────────────────────────────────────
@@ -304,6 +334,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             store["panel"] = False
     except Exception:  # noqa: BLE001
         _LOGGER.debug("面板卸载失败", exc_info=True)
+    # 卸掉挂着的定时回调，避免集成卸载后还在调度
+    for unsub in list((store.get("timer_unsub") or {}).values()):
+        try:
+            unsub()
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("取消定时失败", exc_info=True)
+    (store.get("timer_unsub") or {}).clear()
     return True
 
 
@@ -500,7 +537,7 @@ async def _async_restore_timers(hass: HomeAssistant) -> None:
     if not timers:
         return
 
-    now = dt_util.utcnow().timestamp()
+    now = dt_util.now(timezone.utc).timestamp()
     keep: dict = {}
     for entity_id, item in list(timers.items()):
         if not isinstance(item, dict):
@@ -539,11 +576,14 @@ async def ws_get_config(hass, connection, msg):
 @websocket_api.websocket_command(
     {vol.Required("type"): WS_SAVE_CONFIG, vol.Required("config"): dict}
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_save_config(hass, connection, msg):
-    """前端保存完整配置（保留服务器上正在跑的定时）."""
-    cfg = _save_config_keep_timers(hass, msg["config"])
-    await hass.async_add_executor_job(_write, hass, cfg)
+    """前端保存完整配置（保留服务器上的定时与界面设置）.
+
+    仅管理员可用：户型 / 设备 / 家庭成员的改动会影响全屋每一块屏。
+    """
+    await hass.async_add_executor_job(_save_config_file, hass, msg["config"])
     connection.send_result(msg["id"])
 
 
@@ -682,10 +722,12 @@ async def ws_get_audit(hass, connection, msg):
       limit:  最多返回几条（默认 50，最大 AUDIT_MAX_ENTRIES）
       event:  可选，只返回某类事件（如 "service_call" 只看设备操控）
     """
-    limit = int(msg.get("limit") or 50)
+    limit = _coerce_limit(msg.get("limit"))
     event = msg.get("event") or None
     entries = await hass.async_add_executor_job(_audit_read_recent, limit, event)
     connection.send_result(msg["id"], {"entries": entries})
+
+
 class _QlhBaseView(HomeAssistantView):
     """读写集成目录里的配置文件."""
 
@@ -713,12 +755,16 @@ class QlhConfigView(_QlhBaseView):
         return self.json({"config": data, "version": version})
 
     async def post(self, request):
+        user = request.get("hass_user")
+        if user is not None and not user.is_admin:
+            return self.json({"error": "只有管理员能修改面板配置"}, status_code=403)
         body = await self._body(request)
         cfg = body.get("config")
         if not isinstance(cfg, dict):
             return self.json({"error": "config must be an object"}, status_code=400)
-        cfg = _save_config_keep_timers(self.hass, cfg)
-        await self.hass.async_add_executor_job(_write, self.hass, cfg)
+        cfg = await self.hass.async_add_executor_job(
+            _save_config_file, self.hass, cfg
+        )
         return self.json({"ok": True})
 
 
@@ -807,10 +853,7 @@ class QlhAuditView(_QlhBaseView):
     cors_allowed = True
 
     async def get(self, request):
-        try:
-            limit = int(request.query.get("limit") or 50)
-        except ValueError:
-            limit = 50
+        limit = _coerce_limit(request.query.get("limit"))
         event = request.query.get("event") or None
         entries = await self.hass.async_add_executor_job(_audit_read_recent, limit, event)
         return self.json({"entries": entries})

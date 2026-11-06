@@ -70,6 +70,11 @@ class HaUpstream:
         self.states: States = {}
         self.status: Status = {"kind": "disabled"}
 
+    @property
+    def is_connected(self) -> bool:
+        """WebSocket 是否处于已连上状态（/api/qlh/status 用）."""
+        return bool(self._ws is not None and not self._ws.closed)
+
     async def configure(self, url: str, token: str, enabled: bool = True) -> None:
         await self.stop()
         if not enabled:
@@ -91,6 +96,7 @@ class HaUpstream:
             if not f.done():
                 f.set_exception(ConnectionError("HA 连接已断开"))
         self._pending.clear()
+        self.status = {"kind": "stopped"}
 
     async def call_service(self, domain: str, service: str, entity_id: str, data: dict[str, Any]) -> None:
         """调用 HA 服务（设备操控用）."""

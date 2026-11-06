@@ -13,6 +13,7 @@
 
   const LS_KEY = 'qlh.config.v1';
   const OLD_LS_KEY = 'lovehome.config.v1';
+  const BACKUP_KEY = 'qlh.config.backup';       // 导入 / 重置前的自动快照
   const EVT_READY = 'QLOVEHOME_READY';
   const NS = 'http://www.w3.org/2000/svg';
   /* 编辑器面板尺寸记忆（用户拖右下角调整大小后，下次打开保持） */
@@ -73,6 +74,10 @@
 
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.prototype.slice.call((r || document).querySelectorAll(s));
+  /* 拼 HTML 前统一转义：实体 friendly_name / 房间名 / 设备名都可能含 < > " */
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const el = (tag, cls, html) => {
     const n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -94,6 +99,14 @@
   function applyConfigObject(v) {
     if (!v || typeof v !== 'object') return false;
     for (const k of CONFIG_SECTIONS) if (v[k] != null) window.LH[k] = v[k];
+    /* 坏数据兜底：和主页 applyCfg 保持一致，别让一个字段把整页搞崩 */
+    for (const k of ['rooms', 'devices', 'readouts', 'scenes', 'filters', 'appliances']) {
+      if (!Array.isArray(window.LH[k])) window.LH[k] = [];
+    }
+    if (!window.LH.config || typeof window.LH.config !== 'object') window.LH.config = {};
+    if (!window.LH.plan || typeof window.LH.plan !== 'object') window.LH.plan = {};
+    if (!window.LH.plan.w) window.LH.plan.w = 620;
+    if (!window.LH.plan.h) window.LH.plan.h = 692;
     return true;
   }
 
@@ -103,7 +116,7 @@
     return applyConfigObject(saved);
   }
 
-  /* ── HA 服务器存储（配置存集成自身目录 custom_components/lovehome/qlh/qlh-config.json）
+  /* ── HA 服务器存储（配置存集成自身目录 custom_components/qlovehome/qlh/qlh-config.json）
      装了 QLovehome 集成 → 所有设备/浏览器共享；接口不可用 → 退回本浏览器 localStorage ── */
   let serverReady = false;      // QLovehome 集成接口是否可用
   let storageMode = 'local';    // 'server' | 'local'
@@ -185,7 +198,9 @@
   }
 
   /* 保存当前配置：HA 服务器（主）+ 本机缓存（镜像） */
+  let persistTimer = null;
   function persist() {
+    if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
     const out = exportConfig();
     Store.save(out);                       // 本地镜像：秒开用，服务器是主数据
     saveServerConfig(out).then((ok) => {
@@ -201,11 +216,64 @@
     });
     return true;
   }
+  /* 输入框每敲一个字就整份 POST 太费，也会放大并发覆盖 —— 600ms 合并一次 */
+  function persistSoon() {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => { persistTimer = null; persist(); }, 600);
+  }
 
-  /* 修改后调用：标记 dirty 并即时保存 */
+  /* 修改后调用：标记 dirty 并延迟保存 */
   function markDirty() {
+    pushUndo();
     editState.dirty = true;
+    persistSoon();
+  }
+
+  /* ── 撤销 / 重做（Ctrl+Z / Ctrl+Shift+Z）──
+     每次改动前把「上一份配置」压栈；最多 30 步，避免大底图把内存吃满。
+     lastSnap 始终保存「最近一次保存后的状态」，所以撤销永远回到上一次真实的改动之前。 */
+  const UNDO_MAX = 30;
+  let undoStack = [], redoStack = [], lastSnap = null;
+  function snapCfg() {
+    try { return JSON.stringify(exportConfig()); } catch (e) { return null; }
+  }
+  function pushUndo() {
+    try {
+      const cur = snapCfg();
+      if (cur == null) return;
+      if (lastSnap != null && lastSnap !== cur) {
+        undoStack.push(lastSnap);
+        if (undoStack.length > UNDO_MAX) undoStack.shift();
+        redoStack = [];
+      }
+      lastSnap = cur;
+    } catch (e) { /* 忽略 */ }
+  }
+  function applySnap(s) {
+    if (!s) return false;
+    try { applyConfigObject(JSON.parse(s)); } catch (e) { return false; }
     persist();
+    rerenderEditorTab();
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
+    return true;
+  }
+  function undo() {
+    if (!undoStack.length) { toastHint('没有可撤销的操作了'); return; }
+    const cur = snapCfg();
+    const prev = undoStack.pop();
+    if (cur != null) redoStack.push(cur);
+    lastSnap = prev;
+    applySnap(prev);
+    toastHint('已撤销');
+  }
+  function redo() {
+    if (!redoStack.length) { toastHint('没有可重做的操作了'); return; }
+    const cur = snapCfg();
+    const next = redoStack.pop();
+    if (cur != null) undoStack.push(cur);
+    lastSnap = next;
+    applySnap(next);
+    toastHint('已重做');
   }
 
   /* 家人可挂多台设备：统一读 entities 数组，兼容旧的单 entity */
@@ -262,7 +330,7 @@
     $$('.lh-ed-tab', root).forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 
     // 画房间时鼠标松手在画布外也要结束（全局只注册一次）
-    document.addEventListener('mouseup', (e) => {
+    document.addEventListener('pointerup', (e) => {
       if (planEndDraw) planEndDraw(e);
     });
 
@@ -321,6 +389,12 @@
   }
 
   function openEditor() {
+    /* 非管理员不给开：保存接口需要管理员权限（后端已加 require_admin），开了也存不上 */
+    const h = haHass();
+    if (h && h.user && h.user.is_admin === false) {
+      toastHint('只有管理员能编辑面板配置（户型 / 设备 / 家人）', 2600);
+      return;
+    }
     buildEditor();
     editorRoot.classList.add('open');
     editState.open = true;
@@ -335,6 +409,12 @@
 
   function switchTab(tab) {
     editState.tab = tab;
+    /* 切走时把上一次的绘制状态收干净：否则旧的 planEndDraw 还挂在 document 上，
+       下次松手会拿旧 SVG 的坐标建出一个房间 */
+    if (tab !== 'plan' && editState.plan.drawMode) {
+      const oldSvg = $('.lh-ed-plan-svg', editorRoot);
+      if (oldSvg) cancelDrawMode(oldSvg, $('#lhEdPlanWrap', editorRoot));
+    }
     $$('.lh-ed-tab', editorRoot).forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
     const body = $('#lhEdBody', editorRoot);
     body.innerHTML = '';
@@ -457,13 +537,16 @@
 
     /* ── 画布变换：空格拖动平移 + 滚轮缩放 ── */
     let spaceHeld = false, panning = false;
-    let cx = 0, cy = 0, tx = 0, ty = 0, scale = 1;
+    /* 缩放/平移记在 editState 里：切 tab / 重绘后不再一夜回到 1:1 */
+    const view = editState.plan.view || (editState.plan.view = { tx: 0, ty: 0, scale: 1 });
+    let cx = 0, cy = 0, tx = view.tx, ty = view.ty, scale = view.scale;
     const isInputFocused = () => {
       const el = document.activeElement;
       return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
     };
     const applyTransform = () => {
       svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+      view.tx = tx; view.ty = ty; view.scale = scale;
     };
     const resetTransform = () => { cx = 0; cy = 0; tx = 0; ty = 0; scale = 1; applyTransform(); };
     document.addEventListener('keydown', (e) => {
@@ -479,19 +562,19 @@
       }
       if (e.code === 'Key0' && (e.ctrlKey || e.metaKey)) { resetTransform(); }
     });
-    canvas.addEventListener('mousedown', (e) => {
+    canvas.addEventListener('pointerdown', (e) => {
       if (!spaceHeld || e.button !== 0) return;
       e.preventDefault(); e.stopPropagation();
       panning = true; canvas.classList.add('panning');
       cx = e.clientX; cy = e.clientY;
     });
-    document.addEventListener('mousemove', (e) => {
+    document.addEventListener('pointermove', (e) => {
       if (!panning) return;
       tx += e.clientX - cx; ty += e.clientY - cy;
       cx = e.clientX; cy = e.clientY;
       applyTransform();
     });
-    document.addEventListener('mouseup', () => {
+    document.addEventListener('pointerup', () => {
       if (panning) { panning = false; canvas.classList.remove('panning'); }
     });
     canvas.addEventListener('wheel', (e) => {
@@ -508,6 +591,7 @@
     }, { passive: false });
     // Ctrl+0 重置缩放：把函数暴露到 canvas 上
     canvas._resetTransform = resetTransform;
+    applyTransform();          // 恢复上次的缩放/平移
 
     // 底图栏
     $('#lhEdPhotoBarSlot', wrap).replaceWith(buildPhotoBar());
@@ -608,7 +692,7 @@
     });
 
     /* ── 拖拽画房间（矩形 / 圆形）：按住拖动，松手成房 ── */
-    svg.addEventListener('mousedown', (e) => {
+    svg.addEventListener('pointerdown', (e) => {
       const mode = editState.plan.drawMode;
       if (!mode || (mode !== 'rect' && mode !== 'circle')) return;
       // 落在设备/标签/顶点上不画，让它们自己响应拖动
@@ -617,7 +701,7 @@
       e.preventDefault();
       editState.plan.drawStart = svgPoint(svg, e);
     });
-    svg.addEventListener('mousemove', (e) => {
+    svg.addEventListener('pointermove', (e) => {
       // 矩形/圆形预览
       const mode = editState.plan.drawMode;
       if ((mode === 'rect' || mode === 'circle') && editState.plan.drawStart) {
@@ -652,7 +736,7 @@
         return;
       }
     };
-    svg.addEventListener('mouseup', endDraw);
+    svg.addEventListener('pointerup', endDraw);
     // 松手点落在画布外也要结束绘制：交给全局唯一的 document 监听（避免每切一次 tab 就多挂一个）
     planEndDraw = endDraw;
 
@@ -739,6 +823,15 @@
 
   /* 三种画法共用：顶点数组 → 房间 */
   function createRoomFromPts(pts) {
+    /* 画完立刻退出绘制模式：原来 drawMode 一直挂着，房间拖不动、也找不到可见的退出入口 */
+    editState.plan.drawMode = null;
+    editState.plan.drawStart = null;
+    editState.plan.placeDev = false;
+    editState.plan.newRoomPts = null;
+    const cvs = $('#lhEdPlanCanvas', editorRoot);
+    if (cvs) cvs.classList.remove('drawing', 'placing');
+    const finBtn = $('#lhEdPlanFinish', editorRoot);
+    if (finBtn) finBtn.style.display = 'none';
     let finalPts = pts.map((p) => [+p[0].toFixed(1), +p[1].toFixed(1)]);
     const cx = finalPts.reduce((s, p) => s + p[0], 0) / finalPts.length;
     const cy = finalPts.reduce((s, p) => s + p[1], 0) / finalPts.length;
@@ -1071,7 +1164,17 @@
   }
 
   function finishNewRoom(svg) {
-    const pts = editState.plan.newRoomPts;
+    /* 双击结束绘制时，dblclick 前那两次 click 已经 push 过点：去掉末尾几乎重合的顶点，
+       否则会留下 1~2 个重复顶点（后面轴对齐/重叠检测都会被这些点带偏） */
+    let pts = editState.plan.newRoomPts;
+    if (pts && pts.length > 3) {
+      const out = [];
+      pts.forEach((p) => {
+        const q = out[out.length - 1];
+        if (!q || Math.abs(q[0] - p[0]) > 3 || Math.abs(q[1] - p[1]) > 3) out.push(p);
+      });
+      if (out.length > 2) pts = out;
+    }
     if (!pts || pts.length < 3) {
       /* 不在多边形模式时，「✓ 完成绘制」= 退出矩形/圆形绘制或放设备模式，
          否则用户画完房间后一直停在绘制模式里，没法拖动房间 */
@@ -1170,7 +1273,7 @@
         selectRoom(r.id, e.ctrlKey || e.metaKey || e.shiftKey);
       });
       poly.addEventListener('dblclick', (e) => { e.stopPropagation(); openRoomEditor(r.id); });
-      poly.addEventListener('mousedown', (e) => startDragRoomBody(e, r.id));
+      poly.addEventListener('pointerdown', (e) => startDragRoomBody(e, r.id));
       svg.appendChild(poly);
 
       const states = haStates();
@@ -1203,7 +1306,7 @@
       }
       g.addEventListener('click', (e) => { e.stopPropagation(); selectRoom(r.id, e.ctrlKey || e.metaKey || e.shiftKey); });
       g.addEventListener('dblclick', (e) => { e.stopPropagation(); openRoomEditor(r.id); });
-      g.addEventListener('mousedown', (e) => startDragRoomLabel(e, r.id));
+      g.addEventListener('pointerdown', (e) => startDragRoomLabel(e, r.id));
       svg.appendChild(g);
     });
     // 设备图标
@@ -1213,7 +1316,7 @@
       g.setAttribute('transform', `translate(${d.x} ${d.y})`);
       g.dataset.devId = d.id;
       g.innerHTML = `<circle r="10" class="dot"></circle><text y="24" text-anchor="middle">${d.name}</text>`;
-      g.addEventListener('mousedown', (e) => startDragDevice(e, d));
+      g.addEventListener('pointerdown', (e) => startDragDevice(e, d));
       g.addEventListener('click', (e) => { e.stopPropagation(); selectDevice(d.id, e.ctrlKey || e.metaKey || e.shiftKey); });
       svg.appendChild(g);
     });
@@ -1293,16 +1396,16 @@
       }
     }
     function up() {
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', up);
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
       if (!moved) return;
       poly._skipClick = true;
       markDirty();
       rerenderEditorTab();
       document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     }
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', up);
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
   }
 
   /* 房间名标签拖动：松手后把 lx/ly 存回房间 */
@@ -1322,12 +1425,12 @@
       if (g) g.setAttribute('transform', `translate(${r.lx} ${r.ly})`);
     }
     function up() {
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', up);
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
       markDirty();
     }
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', up);
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
   }
 
   let selected = { type: null, id: null };
@@ -1427,15 +1530,18 @@
     // 拖动过程挂在 document 上：鼠标拖出画布也不会丢
     const move = (ev) => moveDragDevice(ev, drag);
     const up = () => {
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', up);
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
       editState.plan.dragDevice = null;
       g.classList.remove('dragging');
+      /* 拖到哪个房间就归哪个房间（原来只改 x/y，拖进主卧仍算客厅） */
+      const hit = roomAtPoint(d.x, d.y);
+      d.room = hit ? hit.id : '';
       markDirty();
       document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     };
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', up);
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
   }
 
   function moveDragDevice(e, drag) {
@@ -1471,7 +1577,7 @@
       c.setAttribute('class', 'lh-ed-plan-vertex');
       c.dataset.roomId = roomId;
       c.dataset.idx = i;
-      c.addEventListener('mousedown', startDragVertex);
+      c.addEventListener('pointerdown', startDragVertex);
       svg.appendChild(c);
     });
   }
@@ -1504,12 +1610,12 @@
     }
     function up() {
       markDirty();
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', up);
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
       document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
     }
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', up);
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
   }
 
   /* ── 删除操作 ──────────────────────────────────────── */
@@ -1534,8 +1640,16 @@
   }
 
   function deleteRoom(id) {
-    if (!confirm(`确定删除房间 "${id}"？里面的设备也会变成无房间归属。`)) return;
+    const room = (window.LH.rooms || []).find((r) => r.id === id);
+    if (!confirm(`确定删除房间「${room ? room.name : id}」？里面的设备会变成无房间归属。`)) return;
     window.LH.rooms = window.LH.rooms.filter((r) => r.id !== id);
+    /* 反向引用一起清掉：设备 / 读数 / 其它房间的 mirror 别再指向已经不存在的房间 */
+    (window.LH.devices || []).forEach((d) => { if (d.room === id) d.room = ''; });
+    (window.LH.readouts || []).forEach((x) => { if (x.room === id) x.room = ''; });
+    (window.LH.rooms || []).forEach((r) => { if (r.mirror === id) r.mirror = ''; });
+    /* 选中态也要清：否则重绘后 updatePlanInfo 会对 undefined 取 r.name，编辑器整块空白 */
+    if (selected && selected.type === 'room' && selected.id === id) selected = { type: null, id: null };
+    planMulti.delete('r:' + id);
     markDirty();
     rerenderEditorTab();
     document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
@@ -1703,7 +1817,7 @@
       requestAnimationFrame(positionDropdown);
 
       dropdown.querySelectorAll('.lh-ent-item').forEach((it) => {
-        it.addEventListener('mousedown', (ev) => {
+        it.addEventListener('pointerdown', (ev) => {
           ev.preventDefault();        // 阻止 blur
           ev.stopPropagation();
           setValue(it.dataset.eid);
@@ -1765,23 +1879,30 @@
     });
 
     // 点击外部关闭
-    document.addEventListener('mousedown', (e) => {
+    const onDocDown = (e) => {
       if (!pickerOpen || dropdown.hidden) return;
       if (dropdown.contains(e.target)) return;        // 点在 dropdown 里 → 不关
       if (wrapper.contains(e.target)) return;         // 点在 input 里 → 不关（click 事件自己处理）
       dropdown.hidden = true;
       pickerOpen = false;
-    });
+    };
+    document.addEventListener('pointerdown', onDocDown);
 
     // resize / scroll 时重定位
-    window.addEventListener('resize', () => { if (!dropdown.hidden) positionDropdown(); });
+    const onResize = () => { if (!dropdown.hidden) positionDropdown(); };
+    window.addEventListener('resize', onResize);
 
     // 初始值校验
     updateStatus();
 
     return {
       wrapper, setValue, searchInp, updateStatus,
-      destroy() { dropdown.remove(); pickerOpen = false; }
+      destroy() {
+        dropdown.remove();
+        pickerOpen = false;
+        document.removeEventListener('pointerdown', onDocDown);
+        window.removeEventListener('resize', onResize);
+      }
     };
   }
 
@@ -1880,8 +2001,12 @@
     if (!states) { alert('未连接到 Home Assistant'); return; }
     const hass = haHass();  // ★ 用 editor 自己的函数，比内联写更健壮
 
-    // 已经绑定过的主实体 → 标记为 already
-    const existingEntities = new Set((window.LH.devices || []).map((d) => d.entity).filter(Boolean));
+    // 已经绑定过的主实体 / 子实体 → 标记为 already（只认 d.entity 会漏掉整台导入的 d.entities）
+    const existingEntities = new Set();
+    (window.LH.devices || []).forEach((d) => {
+      if (d.entity) existingEntities.add(d.entity);
+      (d.entities || []).forEach((x) => { if (x) existingEntities.add(x); });
+    });
 
     // 只排除真正没用的系统 domain
     const SKIP_DOMAINS = new Set(['history_stats', 'input_boolean', 'input_select',
@@ -2218,12 +2343,12 @@
     else if (!states[d.entity]) stBadge = '<span class="lh-st bad">⚠ 实体不存在</span>';
     else if (states[d.entity].state === 'unavailable' || states[d.entity].state === 'unknown')
       stBadge = '<span class="lh-st off">离线</span>';
-    else stBadge = '<span class="lh-st ok">' + (states[d.entity].state || '') + '</span>';
+    else stBadge = '<span class="lh-st ok">' + esc(states[d.entity].state || '') + '</span>';
     row.innerHTML = `<div class="lh-ed-row-main">
-      <div class="lh-ed-row-title">${d.name || '(无名称)'}</div>
+      <div class="lh-ed-row-title">${esc(d.name || '(无名称)')}</div>
       <div class="lh-ed-row-sub">
-        kind: <b>${d.kind || '—'}</b> · entity: <code>${d.entity || '—'}</code>
-        ${d.room ? ' · 房间: <b>' + roomNameSafe(d.room) + '</b>' : ''}
+        kind: <b>${esc(d.kind || '—')}</b> · entity: <code>${esc(d.entity || '—')}</code>
+        ${d.room ? ' · 房间: <b>' + esc(roomNameSafe(d.room)) + '</b>' : ''}
       </div>
     </div>
     <div class="lh-ed-row-actions">${stBadge}
@@ -2379,7 +2504,7 @@
 
     // 构建表单
     const form = $('#lhEdDevForm', devDialog);
-    const roomOptions = (window.LH.rooms || []).map((r) => `<option value="${r.id}" ${d.room === r.id ? 'selected' : ''}>${r.name}</option>`).join('');
+    const roomOptions = (window.LH.rooms || []).map((r) => `<option value="${esc(r.id)}" ${d.room === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('');
 
     /* 类型九宫格：图标 + 中文名，点选 */
     const kindGrid = KIND_OPTIONS.map(([k, label]) =>
@@ -2516,11 +2641,13 @@
       if (!val || !val.includes('.')) { toastHint('请输入有效的 entity_id（如 switch.xxx）', 1500); return; }
       if (val === d.entity) { toastHint('不能把主实体自己绑成子设备', 1500); return; }
       if (d.children.indexOf(val) >= 0) { toastHint('这个实体已经绑过了', 1500); return; }
-      // 绑定规则校验
+      // 绑定规则校验（热水器识别：先取 friendly_name 字符串再 test，原来对 attributes 对象调 .join 必崩）
       const mainDom = (d.entity || '').split('.')[0];
       const childDom = val.split('.')[0];
+      const mainAttrs = ((haStates() || {})[d.entity] || {}).attributes || {};
+      const mainLabel = String(mainAttrs.friendly_name || '') + ' ' + String(d.name || '');
       const isWaterHeater = mainDom === 'water_heater' ||
-        (mainDom === 'climate' && /热水器|water[_-]?heater/i.test((haStates()[d.entity] || {}).attributes || {}).join(' '));
+        (mainDom === 'climate' && /热水器|water[_-]?heater/i.test(mainLabel));
       const validPairs = { light: ['light'], cover: ['cover'], water_heater: ['switch', 'input_boolean', 'binary_sensor', 'sensor'] };
       if (isWaterHeater) {
         if (validPairs.water_heater.indexOf(childDom) < 0) {
@@ -2588,6 +2715,11 @@
     if (!confirm('确定删除选中的 ' + ids.length + ' 个房间？里面的设备会变成无房间归属。')) return;
     window.LH.rooms = (window.LH.rooms || []).filter((r) => ids.indexOf(r.id) < 0);
     (window.LH.devices || []).forEach((d) => { if (ids.indexOf(d.room) >= 0) d.room = ''; });
+    (window.LH.readouts || []).forEach((x) => { if (ids.indexOf(x.room) >= 0) x.room = ''; });
+    (window.LH.rooms || []).forEach((r) => { if (ids.indexOf(r.mirror) >= 0) r.mirror = ''; });
+    if (selected && selected.type === 'room' && ids.indexOf(selected.id) >= 0) {
+      selected = { type: null, id: null };
+    }
     multiSel.rooms.clear();
     markDirty(); rerenderEditorTab();
     document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
@@ -2598,11 +2730,11 @@
     const row = el('div', 'lh-ed-row');
     row.dataset.id = r.id;
     row.innerHTML = `<div class="lh-ed-row-main">
-      <div class="lh-ed-row-title">${r.name} <span class="lh-ed-row-id">(${r.id})</span></div>
+      <div class="lh-ed-row-title">${esc(r.name)} <span class="lh-ed-row-id">(${esc(r.id)})</span></div>
       <div class="lh-ed-row-sub">
-        传感器：<code>${r.temp || '—'}</code> / <code>${r.hum || '—'}</code>
+        传感器：<code>${esc(r.temp || '—')}</code> / <code>${esc(r.hum || '—')}</code>
         · 设备数: <b>${devCount}</b>
-        ${r.mirror ? ' · 镜像自: <b>' + r.mirror + '</b>' : ''}
+        ${r.mirror ? ' · 镜像自: <b>' + esc(r.mirror) + '</b>' : ''}
       </div>
     </div>
     <div class="lh-ed-row-actions">
@@ -2610,12 +2742,7 @@
       <button class="lh-ed-btn danger" data-act="del" type="button">删除</button>
     </div>`;
     row.querySelector('[data-act="edit"]').onclick = () => openRoomEditor(r.id);
-    row.querySelector('[data-act="del"]').onclick = () => {
-      if (!confirm(`确定删除房间 "${r.name}"？里面的设备会变成无房间归属。`)) return;
-      window.LH.rooms = window.LH.rooms.filter((x) => x.id !== r.id);
-      markDirty(); rerenderEditorTab();
-      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
-    };
+    row.querySelector('[data-act="del"]').onclick = () => deleteRoom(r.id);
     return row;
   }
 
@@ -2980,19 +3107,19 @@
       ov.netUp = $('#oUp', wrap).value.trim();
       /* 国网用电：至少 1 个实体就保存 */
       const p = {};
-      const $ = (id) => $('#' + id, wrap).value.trim();
-      if ($('pKwhMonth')) p.kwhMonth = $('pKwhMonth');
-      if ($('pBillMonth')) p.billMonth = $('pBillMonth');
-      if ($('pBalance')) p.balance = $('pBalance');
-      if ($('pKwhDay')) p.kwhDay = $('pKwhDay');
-      if ($('pDayDate')) p.dayDate = $('pDayDate');
-      if ($('pKwhYear')) p.kwhYear = $('pKwhYear');
-      if ($('pCostYear')) p.costYear = $('pCostYear');
-      if ($('pKwhLM')) p.kwhLastMonth = $('pKwhLM');
-      if ($('pCostLM')) p.costLastMonth = $('pCostLM');
-      if ($('pPM')) p.pMonth = $('pPM');
-      if ($('pVM')) p.vMonth = $('pVM');
-      if ($('pGraph')) p.graph30 = $('pGraph');
+      const val = (id) => $('#' + id, wrap).value.trim();   // 原来这里写成 const $ = … 自遮蔽 → 无限递归，保存必抛 RangeError
+      if (val('pKwhMonth')) p.kwhMonth = val('pKwhMonth');
+      if (val('pBillMonth')) p.billMonth = val('pBillMonth');
+      if (val('pBalance')) p.balance = val('pBalance');
+      if (val('pKwhDay')) p.kwhDay = val('pKwhDay');
+      if (val('pDayDate')) p.dayDate = val('pDayDate');
+      if (val('pKwhYear')) p.kwhYear = val('pKwhYear');
+      if (val('pCostYear')) p.costYear = val('pCostYear');
+      if (val('pKwhLM')) p.kwhLastMonth = val('pKwhLM');
+      if (val('pCostLM')) p.costLastMonth = val('pCostLM');
+      if (val('pPM')) p.pMonth = val('pPM');
+      if (val('pVM')) p.vMonth = val('pVM');
+      if (val('pGraph')) p.graph30 = val('pGraph');
       if (Object.keys(p).length) ov.power = p;
       else delete ov.power;
       window.LH.config.weather = cfg.weather;
@@ -3092,7 +3219,7 @@
     const wrap = el('div', 'lh-ed-data');
     const storeTip = serverReady
       ? '<div class="lh-ed-store ok">✓ 已连接 QLovehome 集成：配置保存在 Home Assistant 服务器上（集成自身目录 qlh/qlh-config.json）。<b>换电脑、换浏览器、手机打开 HA，看到的都是同一个家</b>。</div>'
-      : '<div class="lh-ed-store warn">⚠ 未检测到 QLovehome 集成：当前配置仅保存在本浏览器，换设备会丢失。<br>把 custom_components/lovehome 放进 HA 并重启后，配置会自动存到服务器，全设备共享。</div>';
+      : '<div class="lh-ed-store warn">⚠ 未检测到 QLovehome 集成：当前配置仅保存在本浏览器，换设备会丢失。<br>把 custom_components/qlovehome 放进 HA 并重启后，配置会自动存到服务器，全设备共享。</div>';
     wrap.innerHTML = `
       <h3>配置备份与恢复</h3>
       ${storeTip}
@@ -3182,7 +3309,22 @@
   }
 
   function importConfigObject(v) {
-    if (!v || typeof v !== 'object') { alert('导入失败：不是有效的配置对象'); return; }
+    if (!v || typeof v !== 'object' || Array.isArray(v)) {
+      alert('导入失败：不是有效的配置对象'); return;
+    }
+    /* 结构校验：坏数据一旦写进服务器，主页会直接崩，只能手改 JSON */
+    for (const k of ['rooms', 'devices', 'readouts', 'scenes', 'filters', 'appliances']) {
+      if (v[k] != null && !Array.isArray(v[k])) { alert('导入失败：' + k + ' 必须是数组'); return; }
+    }
+    for (const k of ['config', 'plan', 'supplies', 'panel']) {
+      if (v[k] != null && (typeof v[k] !== 'object' || Array.isArray(v[k]))) {
+        alert('导入失败：' + k + ' 必须是对象'); return;
+      }
+    }
+    const nRooms = (v.rooms || []).length, nDevs = (v.devices || []).length;
+    if (!confirm(`将用这份配置覆盖当前设置（${nRooms} 个房间 / ${nDevs} 台设备）。\n` +
+                 '当前配置会先自动备份到本浏览器，确定继续？')) return;
+    try { localStorage.setItem(BACKUP_KEY, JSON.stringify(exportConfig())); } catch (e) { /* 忽略 */ }
     applyConfigObject(v);
     persist();
     toastHint(serverReady ? '导入成功，已保存到 HA 服务器（所有设备生效）' : '导入成功，已保存到本浏览器');
@@ -3191,17 +3333,17 @@
   }
 
   async function doReset() {
-    if (!confirm('确定要清除所有自定义配置，恢复到模板默认值吗？此操作不可撤销！')) return;
+    if (!confirm('确定要清除所有自定义配置，恢复到模板默认值吗？\n当前配置会先备份到本浏览器。')) return;
+    try { localStorage.setItem(BACKUP_KEY, JSON.stringify(exportConfig())); } catch (e) { /* 忽略 */ }
     Store.clear();
     if (serverReady) {
       // 服务器模式下清空服务器配置（写入空对象 = 回到模板默认值）
       const ok = await saveServerConfig({});
       if (!ok) toastHint('服务器配置清除失败，请稍后重试');
     }
-    // 重新加载页面才能恢复 qlovehome-data.js 里的原始 window.LH
-    if (confirm('需要刷新页面才能完全恢复。现在刷新吗？')) {
-      location.reload();
-    }
+    /* 必须刷新：内存里 window.LH 还是旧配置，不刷新的话随便改一处又会把旧配置写回服务器 */
+    toastHint('已恢复模板，正在刷新…');
+    setTimeout(() => location.reload(), 600);
   }
 
   /* ── 工具：提示气泡 ──────────────────────────────── */
@@ -3227,6 +3369,9 @@
 
   /* ── 注入编辑器入口（在 qlovehome.js 加载完成后） ────────── */
   function injectEntry() {
+    /* 非管理员：不注入编辑入口（后端保存已是管理员专属） */
+    const h = haHass();
+    if (h && h.user && h.user.is_admin === false) return true;
     // 在设置齿轮 (#fnSet) 旁边加一个「编辑」按钮
     const fnSet = $('#fnSet');
     if (!fnSet) return false;     // 还没出现
@@ -3278,6 +3423,14 @@
     });
     // 注入编辑入口（轮询等 boot 跑完 #fnSet 出现）
     pollInject();
+    /* 撤销 / 重做：只在编辑器打开时接管 Ctrl+Z / Ctrl+Shift+Z（Ctrl+Y 同重做） */
+    document.addEventListener('keydown', (e) => {
+      if (!editorRoot || !editorRoot.classList.contains('open')) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = String(e.key || '').toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+    });
   }
 
   /* 等 qlovehome.js boot 完成后再触发重绘（boot 会设置 window.QLOVEHOME_BOOTED） */

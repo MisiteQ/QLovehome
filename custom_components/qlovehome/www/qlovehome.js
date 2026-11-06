@@ -17,8 +17,8 @@
     calMonth: new Date(),
     idleTimer: null,
     online: false,
-    /* 刚下发滑块值的静默期：这段时间内不拿实体旧值覆盖滑块 */
-    holdUntil: 0,
+    /* 刚下发滑块值的静默期：按实体分开记（同时调两台设备时互不影响），8 秒足够云端回报 */
+    hold: {},
     /* 浮层打开时刻 / 这一次按下是否落在浮层里（判断"点空白处关闭"用） */
     layerAt: 0,
     downInLayer: false,
@@ -64,6 +64,15 @@
     if (!cfg || typeof cfg !== 'object') return 0;
     let n = 0;
     for (const k of CFG_SECTIONS) if (cfg[k] != null) { window.LH[k] = cfg[k]; n++; }
+    /* 坏数据兜底：导入 / 手改过的配置可能把数组写成对象、把 plan 写没，
+       这里统一修正，免得一个字段就让整页渲染崩掉（编辑器那边也有同样的校验） */
+    ['rooms', 'devices', 'readouts', 'scenes', 'filters', 'appliances'].forEach((k) => {
+      if (!Array.isArray(window.LH[k])) window.LH[k] = [];
+    });
+    if (!window.LH.config || typeof window.LH.config !== 'object') window.LH.config = {};
+    if (!window.LH.plan || typeof window.LH.plan !== 'object') window.LH.plan = {};
+    if (!window.LH.plan.w) window.LH.plan.w = 620;
+    if (!window.LH.plan.h) window.LH.plan.h = 692;
     return n;
   }
 
@@ -424,9 +433,20 @@
     }).catch(() => { /* 静默 */ });
   }
   function timerDom(e) { return (e || '').split('.')[0]; }
+  /* 到点下发用的 (domain, service)：cover / valve 没有 turn_on / turn_off，
+     直接发会被 HA 拒（面板上表现为「定时到点了但什么都没发生」） */
+  function timerService(e, act) {
+    const dom = timerDom(e);
+    if (dom === 'cover') return ['cover', act === 'on' ? 'open_cover' : 'close_cover'];
+    if (dom === 'valve') return ['valve', act === 'on' ? 'open_valve' : 'close_valve'];
+    return [dom, act === 'on' ? 'turn_on' : 'turn_off'];
+  }
   function timerOk(d) { return !!d && !!d.entity && TDOMS.indexOf(timerDom(d.entity)) >= 0; }
   function fmtMin(m) {
-    return m < 60 ? m + ' 分钟' : (m % 60 ? (m / 60) + ' 小时' : (m / 60) + ' 小时');
+    m = Math.round(Number(m) || 0);
+    if (m < 60) return m + ' 分钟';
+    const h = Math.floor(m / 60), r = m % 60;
+    return r ? (h + ' 小时 ' + r + ' 分钟') : (h + ' 小时');
   }
   function fmtLeft(ms) {
     const s = Math.max(0, Math.round(ms / 1000)), m = Math.floor(s / 60);
@@ -461,10 +481,11 @@
         if (!it) return;
         if (now >= it.end) {
           delete t[e]; dirty = true;
-          /* 服务器应该已经执行了；接口暂时不通时本机补一刀（turn_on/off 幂等，重复无害） */
+          /* 服务器应该已经执行了；接口暂时不通时本机补一刀（开关类服务幂等，重复无害） */
           if (now - it.end < 300000) {
-            sendControl(timerDom(e), it.act === 'off' ? 'turn_off' : 'turn_on',
-              { entity_id: e }, (it.n || '定时') + ' · ' + (it.act === 'off' ? '关闭' : '开启'));
+            const ts = timerService(e, it.act === 'off' ? 'off' : 'on');
+            sendControl(ts[0], ts[1], { entity_id: e },
+              (it.n || '定时') + ' · ' + (it.act === 'off' ? '关闭' : '开启'));
           } else {
             toast((it.n || e) + ' · 定时已结束');
           }
@@ -634,40 +655,60 @@
      只有 0（顶上）、100（到底）、50（**「中间」= 在动或没报准，不是真的 50%**）三种值，
      而且 50 时 HA 还会把 state 推成 open —— 直接念成「已放下 50%」就是撒谎。
      做法：运动态优先，其次两个确定位；报 50 时用上一次到位的记录兜底。 */
+  /* 「上一次到位」按实体分开存：家里同时有窗帘 + 晾衣架时不能共用一个键。
+     值形如 {"cover.airer":"up"}；老版本存的裸字符串也能读懂（只作用于当前实体） */
   const AIRER_KEY = 'lh.airer.at';
-  function airerAt() { return uiRead('airerAt') || ''; }
-  function airerSet(v) { if (airerAt() !== v) uiWrite('airerAt', v); }
-  function coverPos(s) {
+  function airerMap() {
+    try {
+      const raw = uiRead('airerAt');
+      const v = raw ? JSON.parse(raw) : {};
+      return (v && typeof v === 'object') ? v : {};
+    } catch (e) { return {}; }
+  }
+  function airerAt(entity) {
+    if (!entity) return '';
+    const v = airerMap()[entity];
+    return typeof v === 'string' ? v : '';
+  }
+  function airerSet(entity, v) {
+    if (!entity || airerAt(entity) === v) return;
+    const m = airerMap();
+    m[entity] = v;
+    uiWrite('airerAt', JSON.stringify(m));
+  }
+  function coverPos(s, entity) {
     if (!s) return { text: '—' };
     if (s.state === 'unavailable') return { text: '离线' };
     const p = (s.attributes || {}).current_position;
-    if (p === 0) { airerSet('up'); return { text: '已升到顶', p }; }
-    if (p === 100) { airerSet('down'); return { text: '已放到底', p }; }
+    if (p === 0) { airerSet(entity, 'up'); return { text: '已升到顶', p }; }
+    if (p === 100) { airerSet(entity, 'down'); return { text: '已放到底', p }; }
     if (s.state === 'opening') return { text: '下降中', p };
     if (s.state === 'closing') return { text: '上升中', p };
-    const m = airerAt();
+    const m = airerAt(entity);
     if (m === 'up') return { text: '已升到顶', p, guess: true };
     if (m === 'down') return { text: '已放到底', p, guess: true };
     return { text: '位置不明', p };
   }
   /* 换个浏览器 / 清了缓存就没了「上次到位」，那格会一直写「位置不明」。
-     开机时用一次 history 把最近一次 0 / 100 找回来（7 天，一条实体，量很小）。 */
+     开机时用一次 history 把最近一次 0 / 100 找回来（7 天，一条实体，量很小）。
+     优先挑晾衣架：家里有窗帘时，随便取第一台 cover 会把窗帘的位置写进晾衣架。 */
   let airerSeed = 0;
   function seedAirer() {
     if (airerSeed) return;
     const h = hass();
     if (!h || !h.callApi) return;
-    const d = (LH.devices || []).find((x) => x.entity && x.entity.split('.')[0] === 'cover');
-    if (!d) return;
+    const covers = (LH.devices || []).filter((x) => x.entity && x.entity.split('.')[0] === 'cover');
+    if (!covers.length) return;
+    const rack = covers.find((x) => /晾衣|airer|dry|clothes/i.test(x.name || '')) || covers[0];
     airerSeed = 1;
     const t0 = new Date(Date.now() - 7 * 864e5).toISOString();
-    h.callApi('GET', 'history/period/' + t0 + '?filter_entity_id=' + d.entity)
+    h.callApi('GET', 'history/period/' + t0 + '?filter_entity_id=' + rack.entity)
       .then((res) => {
         const rows = (res && res[0]) || [];
         for (let i = rows.length - 1; i >= 0; i--) {
           const p = (rows[i].attributes || {}).current_position;
-          if (p === 0) { airerSet('up'); return; }
-          if (p === 100) { airerSet('down'); return; }
+          if (p === 0) { airerSet(rack.entity, 'up'); return; }
+          if (p === 100) { airerSet(rack.entity, 'down'); return; }
         }
       })
       .catch(() => { airerSeed = 0; });
@@ -679,7 +720,7 @@
     if (fb) return '在线';
     const dom = d.entity.split('.')[0];
     if (dom === 'camera') return CAM_TEXT[s.state] || stateLabel(s);
-    if (dom === 'cover') return coverPos(s).text;
+    if (dom === 'cover') return coverPos(s, d.entity).text;
     return stateLabel(s);
   }
   function devText(d) {
@@ -703,7 +744,7 @@
       if (s.state !== 'off' && a.temperature != null) parts.push('设定 ' + a.temperature + '°');
       return parts.join(' · ');
     }
-    if (dom === 'cover') return coverPos(s).text;
+    if (dom === 'cover') return coverPos(s, d.entity).text;
     if (dom === 'media_player') {
       const t = a.media_title;
       return t ? (stateLabel(s) + ' · ' + t) : stateLabel(s);
@@ -1149,22 +1190,24 @@
       const grid = new Uint8Array(gw * gh);
       scanlineFill(grid, polys, gw, gh, x0, y0, cell);
 
-      /* 圆形核膨胀 padOut */
+      /* 膨胀 padOut：先横后纵两趟（O(格数·R)）。
+         原来每格扫 (2R+1)² 的圆核，pad 翻到 220 时 R=37，低端平板上会卡住主线程；
+         方形核经过后面的 rdp + chaikin 平滑，肉眼看不出差别。 */
       const R = Math.max(1, Math.ceil(padOut / cell));
-      const out = new Uint8Array(gw * gh);
-      const r2 = R * R;
+      const tmp = new Uint8Array(gw * gh);
       for (let row = 0; row < gh; row++) {
         for (let col = 0; col < gw; col++) {
           if (!grid[row * gw + col]) continue;
-          for (let dy = -R; dy <= R; dy++) {
-            const rr = row + dy;
-            if (rr < 0 || rr >= gh) continue;
-            for (let dx = -R; dx <= R; dx++) {
-              const cc = col + dx;
-              if (cc < 0 || cc >= gw || dx * dx + dy * dy > r2) continue;
-              out[rr * gw + cc] = 1;
-            }
-          }
+          const c0 = Math.max(0, col - R), c1 = Math.min(gw - 1, col + R);
+          for (let c = c0; c <= c1; c++) tmp[row * gw + c] = 1;
+        }
+      }
+      const out = new Uint8Array(gw * gh);
+      for (let row = 0; row < gh; row++) {
+        for (let col = 0; col < gw; col++) {
+          if (!tmp[row * gw + col]) continue;
+          const r0 = Math.max(0, row - R), r1 = Math.min(gh - 1, row + R);
+          for (let rr = r0; rr <= r1; rr++) out[rr * gw + col] = 1;
         }
       }
 
@@ -1297,7 +1340,7 @@
     const MAX_PAD = 40;
     let finalLoop = null, finalCell = 4;
 
-    for (let tryNo = 0; tryNo < 6; tryNo++) {
+    for (let tryNo = 0; tryNo < 20; tryNo++) {
       let cell = 4;
       const spanW = maxX - minX + padOut * 2 + 24;
       const spanH = maxY - minY + padOut * 2 + 24;
@@ -1312,21 +1355,22 @@
       const grid = new Uint8Array(gw * gh);
       scanlineFill(grid, valid, gw, gh, x0, y0, cell);
       if (padOut > 0) {
+        /* 同 autoOutlineLoops：可分离膨胀，别做 (2R+1)² 的圆核 */
         const R = Math.max(1, Math.ceil(padOut / cell));
-        const out = new Uint8Array(gw * gh);
-        const r2 = R * R;
+        const tmp = new Uint8Array(gw * gh);
         for (let row = 0; row < gh; row++) {
           for (let col = 0; col < gw; col++) {
             if (!grid[row * gw + col]) continue;
-            for (let dy = -R; dy <= R; dy++) {
-              const rr = row + dy;
-              if (rr < 0 || rr >= gh) continue;
-              for (let dx = -R; dx <= R; dx++) {
-                const cc = col + dx;
-                if (cc < 0 || cc >= gw || dx * dx + dy * dy > r2) continue;
-                out[rr * gw + cc] = 1;
-              }
-            }
+            const c0 = Math.max(0, col - R), c1 = Math.min(gw - 1, col + R);
+            for (let c = c0; c <= c1; c++) tmp[row * gw + c] = 1;
+          }
+        }
+        const out = new Uint8Array(gw * gh);
+        for (let row = 0; row < gh; row++) {
+          for (let col = 0; col < gw; col++) {
+            if (!tmp[row * gw + col]) continue;
+            const r0 = Math.max(0, row - R), r1 = Math.min(gh - 1, row + R);
+            for (let rr = r0; rr <= r1; rr++) out[rr * gw + col] = 1;
           }
         }
         for (let i = 0; i < out.length; i++) grid[i] = out[i];
@@ -1504,7 +1548,7 @@
 
     // 房间色块 + 光晕
     LH.rooms.forEach((r) => {
-      const b = bbox(r.pts);
+      if (!r.pts) return;                 // 没有轮廓的房间直接跳过，别让整个户型图崩掉
       const g = document.createElementNS(NS, 'g');
       g.dataset.room = r.id;
 
@@ -1609,14 +1653,17 @@
 
       svg.append(g);
 
-      // 拖拽房间名字调整位置
-      g.addEventListener('mousedown', (e) => {
+      // 拖拽房间名字调整位置（pointer 事件：触摸屏也能拖）
+      g.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         e.stopPropagation();
         const p0 = svgPoint(svg, e);
         const ox = p0.x - (Number(r.lx) || 0);
         const oy = p0.y - (Number(r.ly) || 0);
         g.style.cursor = 'grabbing';
+        if (g.setPointerCapture) {
+          try { g.setPointerCapture(e.pointerId); } catch (err) { /* 某些浏览器不支持 */ }
+        }
         function move(ev) {
           const p = svgPoint(svg, ev);
           r.lx = Math.round((p.x - ox) * 10) / 10;
@@ -1624,28 +1671,26 @@
           g.setAttribute('transform', `translate(${r.lx} ${r.ly})`);
         }
         function up() {
-          document.removeEventListener('mousemove', move);
-          document.removeEventListener('mouseup', up);
+          document.removeEventListener('pointermove', move);
+          document.removeEventListener('pointerup', up);
           g.style.cursor = '';
           // 保存：本机缓存 + HA 服务器（换电脑也保持）
           try {
-            let cfg = localCfgRead();
-            if (!cfg) {
-              cfg = {};
-              ['plan', 'rooms', 'devices', 'config'].forEach((k) => {
-                if (window.LH[k] != null) cfg[k] = window.LH[k];
-              });
-            }
+            /* 兜底时把全部配置段都带上：只写 4 段会把 readouts/scenes 等从缓存里抹掉 */
+            const cfg = localCfgRead() || {};
+            CFG_SECTIONS.forEach((k) => {
+              if (cfg[k] == null && window.LH[k] != null) cfg[k] = window.LH[k];
+            });
             if (!cfg.rooms) cfg.rooms = [];
             const room = cfg.rooms.find((x) => x.id === r.id);
             if (room) { room.lx = r.lx; room.ly = r.ly; }
             else { cfg.rooms.push({ id: r.id, lx: r.lx, ly: r.ly }); }
             localCfgWrite(cfg);
             remoteCfgSave(cfg);
-          } catch (e) { /* 无痕模式忽略 */ }
+          } catch (err) { /* 无痕模式忽略 */ }
         }
-        document.addEventListener('mousemove', move);
-        document.addEventListener('mouseup', up);
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', up);
       });
     });
 
@@ -1714,7 +1759,7 @@
       const b = el('button', 'side-room');
       b.type = 'button';
       b.dataset.room = r.id;
-      b.innerHTML = '<em></em><span>' + r.name + '</span><b>—</b>';
+      b.innerHTML = '<em></em><span>' + esc(r.name) + '</span><b>—</b>';
       b.addEventListener('click', () => openRoom(r.id));
       list.append(b);
     });
@@ -1788,7 +1833,7 @@
     g.dataset.kind = d.kind;
     g.setAttribute('transform', `translate(${d.x} ${d.y})`);
     g.innerHTML =
-      `<title>${d.name}</title>` +
+      `<title>${esc(d.name)}</title>` +
       '<g class="mkin">' +
         '<circle class="halo" r="19"/>' +
         // cap：不透明底盘。关态的 dot 只有 10% 填充，房间色块会透过来，
@@ -1983,7 +2028,7 @@
     const subWorth = sub && sub !== '开启' && sub !== '关闭';
     item.innerHTML =
       `<span class="ri"><svg><use href="#${ICON[d.kind] || 'i-wave'}"/></svg></span>` +
-      `<span class="rn">${d.name}${(act || comp) && subWorth ? `<i>${sub}</i>` : ''}</span>`;
+      `<span class="rn">${esc(d.name)}${(act || comp) && subWorth ? `<i>${esc(sub)}</i>` : ''}</span>`;
     if (comp) {
       /* 复合设备：右侧给一个明晃晃的入口按钮，点条目任意位置也都进同一个弹窗 */
       const go = el('button', 'rgo');
@@ -2009,7 +2054,7 @@
   function fmtReadout(x) {
     const s = st(x.entity);
     if (!s) return '—';
-    if (x.kind === 'cover') return coverPos(s).text;
+    if (x.kind === 'cover') return coverPos(s, x.entity).text;
     const v = s.state;
     if (x.map && x.map[v] != null) return x.map[v];
     if (v === 'unavailable') return '离线';
@@ -2038,8 +2083,17 @@
     $$('#rpBody [data-dev]').forEach((item) => {
       const d = LH.devices.find((x) => x.id === item.dataset.dev);
       if (!d) return;
-      const sub = item.querySelector('.rn i');
-      if (sub) sub.textContent = devText(d);
+      /* 副标题要能动态出现：打开面板时设备是「关」，之后开始播放/进制冷，
+         原来只改已有的 <i>，节点不存在就永远不显示 */
+      const dv = devText(d);
+      const worth = dv && dv !== '开启' && dv !== '关闭';
+      const rn = item.querySelector('.rn');
+      let sub = rn ? rn.querySelector('i') : null;
+      if (rn && worth && !sub) { sub = el('i'); rn.append(sub); }
+      if (sub) {
+        if (worth) sub.textContent = dv;
+        else sub.remove();
+      }
       const rv = item.querySelector('.rv');
       if (rv) rv.textContent = rvText(d);
       const sw = item.querySelector('.sw');
@@ -2247,7 +2301,8 @@
       groups: [
         { t: '出水', items: [
           { k: 'ro', label: '工作状态', e: d.entity, unit: '' },
-          { k: 'num', label: '出水温度设定', e: d.entity, unit: '°C' },
+          { k: 'num', label: '出水温度设定', e: d.entity, unit: '°C', aval: 'temperature',
+            dom: 'water_heater', svc: 'set_temperature', field: 'temperature' },
           { k: 'ro', label: '当前水温', e: eids.find((e) => /current.*temp|water_temp/i.test(e)) || '', unit: '°C' },
         ].filter((x) => x.e) },
         { t: '水质', items: [
@@ -2972,8 +3027,9 @@
     // ★ 底部大 power button（如果 ctl 标记了 _powerEid）
     if (d.ctl._powerEid) {
       const s = st(d.ctl._powerEid);
-      const on = !!s && ['on', 'open', 'unlocked', 'active'].includes(s.state);
-      html += `<div class="ctl-foot"><button class="wide" id="ctlPower" type="button" data-e="${d.ctl._powerEid}">${on ? '关闭' : '开启'} · ${d.name}</button></div>`;
+      const on = !!s && (ON_STATES.includes(s.state) ||
+        (Array.isArray(d.ctl.onvals) && d.ctl.onvals.includes(s.state)));
+      html += `<div class="ctl-foot"><button class="wide" id="ctlPower" type="button" data-e="${d.ctl._powerEid}">${on ? '关闭' : '开启'} · ${esc(d.name)}</button></div>`;
     }
     box.innerHTML = html;
     // 绑定 power button 点击
@@ -2995,8 +3051,8 @@
   }
 
   function cgroup(g) {
-    return '<div class="cgrp"><div class="cgrp-t">' + g.t + '</div>' +
-      (g.hint ? '<div class="cgrp-h">' + g.hint + '</div>' : '') +
+    return '<div class="cgrp"><div class="cgrp-t">' + esc(g.t) + '</div>' +
+      (g.hint ? '<div class="cgrp-h">' + esc(g.hint) + '</div>' : '') +
       (g.items || []).map((it) => crow(it)).join('') + '</div>';
   }
 
@@ -3004,7 +3060,7 @@
   function crow(it) {
     const i = state.ci.push(it) - 1;
     const A = `data-ci="${i}"`;
-    const lab = `<span class="clab">${it.label}</span>`;
+    const lab = `<span class="clab">${esc(it.label)}</span>`;
     if (it.k === 'ro') return `<div class="crow ro">${lab}<b class="cval" ${A}>—</b></div>`;
     if (it.k === 'sw') return `<div class="crow">${lab}` +
       `<button class="csw" type="button" ${A} aria-label="${it.label}"><i></i></button></div>`;
@@ -3020,7 +3076,7 @@
         return tr(ALIAS_MAP, String(o).toLowerCase());
       };
       return `<div class="crow">${lab}<div class="cseg" ${A}>` +
-        opts.map((o) => `<button type="button" data-opt="${o}">${lbl(o)}</button>`).join('') +
+        opts.map((o) => `<button type="button" data-opt="${esc(o)}">${esc(lbl(o))}</button>`).join('') +
         '</div></div>';
     }
     if (it.k === 'sel') {
@@ -3028,7 +3084,7 @@
       const opts = ((s && s.attributes && s.attributes.options) || it.opts || []);
       const lbl = (o) => (it.map && it.map[o]) || (o + (it.suffix || ''));
       return `<div class="crow">${lab}<select class="csel" ${A}>` +
-        opts.map((o) => `<option value="${o}">${lbl(o)}</option>`).join('') +
+        opts.map((o) => `<option value="${esc(o)}">${esc(lbl(o))}</option>`).join('') +
         '</select></div>';
     }
     if (it.k === 'num') {
@@ -3056,8 +3112,8 @@
       const s = st(it.mode);
       const opts = ((s && s.attributes && s.attributes.options) || []);
       return `<div class="crow ctlkey">${lab}<div class="cseg sm" ${A} data-mode-for="${it.mode}">` +
-        opts.map((o) => `<button type="button" data-opt="${o}">` +
-          String(o).replace(/开关$/, '') + '</button>').join('') +
+        opts.map((o) => `<button type="button" data-opt="${esc(o)}">` +
+          esc(String(o).replace(/开关$/, '')) + '</button>').join('') +
         '</div>' +
         `<button class="csw" type="button" ${A} data-for="${it.e}" aria-label="${it.label}"><i></i></button>` +
         '</div>';
@@ -3080,7 +3136,7 @@
     if (sub) sub.textContent = ctlSub(s, a);
     /* 晾衣架的位置是推出来的（三档 + 上次到位），不能按 data-attr 念原始数字 */
     const cv = $('#covPos', box);
-    if (cv) cv.textContent = coverPos(s).text;
+    if (cv) cv.textContent = coverPos(s, d.entity).text;
     /* 数值回显：任何带 data-attr 的元素都跟着实体属性走 */
     $$('[data-attr]', box).forEach((n) => {
       if (n.tagName === 'INPUT') return;   /* 滑块的 data-attr 只用于取值，下面单独回填 */
@@ -3089,7 +3145,7 @@
         : (typeof v === 'number' ? Math.round(v * 100) / 100 : v) + (n.dataset.unit || '');
     });
     /* 滑块 = 实体属性的镜子：除非正在拖，或刚下发还没回报，否则一律按实际值回填 */
-    if (!state.drag && Date.now() > (state.holdUntil || 0)) {
+    if (!state.drag && Date.now() > ((state.hold || {})[d.entity] || 0)) {
       $$('input[type=range]', box).forEach((r) => {
         const v = a[r.dataset.attr];
         if (v == null) return;
@@ -3099,7 +3155,13 @@
         if (o) o.textContent = r.value + (r.dataset.unit || '%');
       });
     }
-    $$('[data-mode]', box).forEach((b) => b.classList.toggle('on', s.state === b.dataset.mode));
+    /* humidifier 的模式在属性 mode 里（state 只有 on/off）；其余域仍然比 state */
+    const isHum = (d.entity || '').indexOf('humidifier.') === 0;
+    const modeNow = isHum && a.mode != null ? a.mode : s.state;
+    $$('[data-mode]', box).forEach((b) => b.classList.toggle('on', modeNow === b.dataset.mode));
+    /* water_heater 的工作模式在属性 operation_mode 里，之前完全没回填 */
+    $$('[data-op]', box).forEach((b) => b.classList.toggle('on',
+      (a.operation_mode != null ? a.operation_mode : s.state) === b.dataset.op));
     $$('[data-fan]', box).forEach((b) => b.classList.toggle('on', a.fan_mode === b.dataset.fan));
     $$('[data-preset]', box).forEach((b) => b.classList.toggle('on', a.preset_mode === b.dataset.preset));
     $$('[data-src]', box).forEach((b) => b.classList.toggle('on', a.source === b.dataset.src));
@@ -3156,7 +3218,7 @@
       if (n.classList.contains('crng')) {
         n.disabled = dead;
         const raw = s ? (it.aval ? (s.attributes || {})[it.aval] : s.state) : null;
-        if (!state.drag && Date.now() > (state.holdUntil || 0) && Number.isFinite(Number(raw))) {
+        if (!state.drag && Date.now() > ((state.hold || {})[it.e] || 0) && Number.isFinite(Number(raw))) {
           n.value = raw;
         }
         const o = $(`[data-cv="${n.dataset.ci}"]`, box);
@@ -3166,6 +3228,16 @@
       /* 按钮类：离线时禁用 */
       if (n.classList.contains('cbtn')) n.disabled = dead;
     });
+    /* 底部大按钮的文案跟着状态走：否则点完「开启」还一直显示「开启 · X」 */
+    const pw = $('#ctlPower', box);
+    if (pw && d.ctl && d.ctl._powerEid) {
+      const ps = st(d.ctl._powerEid);
+      const dead = !ps || ps.state === 'unavailable';
+      const on = !!ps && (ON_STATES.includes(ps.state) ||
+        (Array.isArray(d.ctl.onvals) && d.ctl.onvals.includes(ps.state)));
+      pw.disabled = dead;
+      pw.textContent = dead ? '离线 · 暂不可控' : ((on ? '关闭' : '开启') + ' · ' + d.name);
+    }
   }
 
   /* 复合设备的下发：整块 layerBody 一次委托，弹窗重建也不用重复绑定 */
@@ -3216,14 +3288,22 @@
       if (n.classList.contains('csw')) {
         const e = n.dataset.for || it.e;
         const s = st(e);
-        const on = !!s && (s.state === 'on' || s.state === 'open');
+        /* 和 paintComposite(3137) 用同一套「算不算开着」的判据：
+           water_heater 的 gas / lock 的 unlocked / humidifier 的 on 都算开着，
+           否则按钮亮着、点下去方向却是反的 */
+        const on = !!s && (ON_STATES.includes(s.state) ||
+          (Array.isArray(it.onvals) && it.onvals.includes(s.state)));
         /* 实体不一定在 switch 域（马桶夜灯就是 light）：按域挑服务，否则下发会被 HA 拒 */
         const dm = (e || '').split('.')[0];
         const svcDom = dm === 'light' ? 'light' : dm === 'cover' ? 'cover'
           : dm === 'fan' ? 'fan' : dm === 'media_player' ? 'media_player'
           : dm === 'climate' ? 'climate' : dm === 'water_heater' ? 'water_heater'
-          : dm === 'humidifier' ? 'humidifier' : 'switch';
-        sendControl(svcDom, on ? 'turn_off' : 'turn_on', { entity_id: e },
+          : dm === 'humidifier' ? 'humidifier' : dm === 'lock' ? 'lock'
+          : dm === 'vacuum' ? 'vacuum' : dm === 'valve' ? 'valve' : 'switch';
+        /* 门锁：turn_on/turn_off 在 HA 里是 deprecated，走 lock / unlock */
+        const svc = svcDom === 'lock' ? (on ? 'unlock' : 'lock')
+          : (on ? 'turn_off' : 'turn_on');
+        sendControl(svcDom, svc, { entity_id: e },
           (on ? '关闭' : '开启') + ' · ' + it.label);
         return;
       }
@@ -3254,7 +3334,7 @@
       }
       if (n.classList.contains('crng')) {
         state.drag = false;
-        state.holdUntil = Date.now() + 2500;
+        state.hold[it.e] = Date.now() + 8000;
         const v = Number(n.value);
         /* 默认 number.set_value；water_heater 是 set_temperature + temperature 字段 */
         const dm = it.dom || n.dataset.dom || 'number';
@@ -3306,8 +3386,8 @@
       });
       r.addEventListener('change', () => {
         state.drag = false;
-        /* 刚下发的 2.5 秒内不拿实体旧值覆盖滑块，等它回报上来再对齐 */
-        state.holdUntil = Date.now() + 2500;
+        /* 刚下发的 8 秒内不拿实体旧值覆盖滑块，等它回报上来再对齐 */
+        state.hold[d.entity] = Date.now() + 8000;
         const src = Number(r.dataset.src || 100);
         const pct = Number(r.value);
         let v = pct / 100 * src;
@@ -3534,7 +3614,7 @@
         ? slider({ id: 'ctlHum', label: '湿度', attr: 'humidity', src: 100,
           svc: 'humidifier.set_humidity', field: 'humidity', val: a.humidity }) : '') +
       ((a.available_modes || []).length
-        ? `<div class="ctl-row">${a.available_modes.map((m) => `<button data-mode="${m}" type="button">${m}</button>`).join('')}</div>` : '') +
+        ? `<div class="ctl-row">${a.available_modes.map((m) => `<button data-mode="${esc(m)}" type="button">${esc(m)}</button>`).join('')}</div>` : '') +
       '<div class="ctl-foot"><button class="wide" id="ctlPower" type="button">开机 / 关机</button></div>';
     $$('[data-mode]', box).forEach((b) => b.addEventListener('click', () => {
       sendControl('humidifier', 'set_mode', { entity_id: d.entity, mode: b.dataset.mode }, '模式 ' + b.dataset.mode);
@@ -3555,7 +3635,7 @@
       '<button class="round" data-t="1" type="button" aria-label="升温">＋</button>' +
       '</div>' +
       ((a.operation_list || []).length
-        ? `<div class="ctl-row">${a.operation_list.map((m) => `<button data-op="${m}" type="button">${m}</button>`).join('')}</div>` : '') +
+        ? `<div class="ctl-row">${a.operation_list.map((m) => `<button data-op="${esc(m)}" type="button">${esc(m)}</button>`).join('')}</div>` : '') +
       '<div class="ctl-foot"><button class="wide" id="ctlPower" type="button">开机 / 关机</button></div>';
     box.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => {
       const a2 = (st(d.entity) || { attributes: {} }).attributes || {};
@@ -4101,8 +4181,8 @@
     if (!box) return;
     box.innerHTML = '';
     const h = hass();
-    const down = mbps(LH.config.overview.netDown);
-    const up = mbps(LH.config.overview.netUp);
+    const down = mbps((LH.config.overview || {}).netDown);
+    const up = mbps((LH.config.overview || {}).netUp);
     /* 卡片顺序（v212 起，用户要求）：用电 · 安防 · 温湿度 · 电池耗材 · 摄像头 排前面，
        网络 / 系统 / 其他设备 这三张「运维向」的挪到最后面 —— 它们不是天天看的东西。
        三张卡的构造都留在函数末尾，变量（down/up/nEnt）照旧在上面算。
@@ -4124,8 +4204,8 @@
           (w && w.batt != null && w.batt <= WATCH_LOW ? ' low' : '') + '"' +
           ' data-idx="' + pi + '">' +
           '<i class="d ' + (on ? 'ok' : 'no') + '"></i>' +
-          '<div class="ppl-m"><span>' + label + '</span>' +
-          (line ? '<em>' + line + '</em>' : '') + '</div>' +
+          '<div class="ppl-m"><span>' + esc(label) + '</span>' +
+          (line ? '<em>' + esc(line) + '</em>' : '') + '</div>' +
           '<b>' + (on ? '在家' : ps.known ? '离家' : '检测中') + '</b></div>';
       }).join('') + '</div>' +
         '<div class="card-sub">按 ' + PPL.reduce((n, p) => n + personEnts(p).length, 0) +
@@ -4290,11 +4370,11 @@
   }
   function appRow(r) {
     const s = st(r[1]);
-    if (!s) return `<div class="app-line"><span>${r[0]}</span><b>—</b></div>`;
+    if (!s) return `<div class="app-line"><span>${esc(r[0])}</span><b>—</b></div>`;
     /* 晾衣架这类：位置是「三档 + 上次到位」推出来的，不能念 state/百分比，
        配置里用 {'@cover': true} 占住第 3 项就把这行交给 coverPos() */
     if (r[2] && r[2]['@cover']) {
-      return `<div class="app-line"><span>${r[0]}</span><b>${coverPos(s).text}</b></div>`;
+      return `<div class="app-line"><span>${esc(r[0])}</span><b>${coverPos(s, r[1]).text}</b></div>`;
     }
     /* 单位：配置里常写成 ' °C' / ' 分钟'（带前导空格），统一 trim 掉，
        拼接时自己补一个空格 —— 否则会印成「50  °C」两个空格 */
@@ -5309,6 +5389,8 @@
   }
 
   function paintValues() {
+    /* 壁挂屏常年开着，但切到 HA 别的面板 / 息屏时没必要每 2 秒重排一次 */
+    if (document.hidden) return;
     const t = roomAvg('temp') ?? num(LH.config.weather.temp, null);
     const h = roomAvg('hum') ?? num(LH.config.weather.hum, null);
     $('#inTemp').textContent = t == null ? '—' : t.toFixed(1);
@@ -5453,7 +5535,7 @@
   function watchRows(pairs, cls) {
     const c = 'ci-r' + (cls ? ' ' + cls : '');
     return (pairs || []).filter((x) => x && x.length > 1 && x[1] != null && x[1] !== '' && x[1] !== undefined)
-      .map((x) => '<div class="' + c + '"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('')
+      .map((x) => '<div class="' + c + '"><span>' + esc(x[0]) + '</span><b>' + esc(x[1]) + '</b></div>').join('')
       || '<div class="' + c + '"><span>—</span><b>没有可显示的项</b></div>';
   }
   /* 这台手表的全部实体：14 个实体共用同一个 did 前缀（domain 各不相同），
@@ -5958,7 +6040,7 @@
       b.type = 'button';
       /* title 用情景自带的 hint：一眼能看出这一下会动多少设备（比如「打开全屋 25 盏灯」） */
       b.title = s.hint || s.name;
-      b.innerHTML = `<svg><use href="#${s.icon}"/></svg><span>${s.name}</span>`;
+      b.innerHTML = `<svg><use href="#${s.icon}"/></svg><span>${esc(s.name)}</span>`;
       b.addEventListener('click', () => applyScene(s.id));
       scenes.append(b);
     });
@@ -5983,8 +6065,11 @@
     buildFilterChips();
 
     $('#roomInfoBtn').addEventListener('click', () => {
-      if (state.room) closeRoom();
-      else openRoom('living');
+      if (state.room) { closeRoom(); return; }
+      /* 不再写死 'living'：用户删了客厅/改了房间 id 后这个按钮会变成哑巴 */
+      const first = (LH.rooms || [])[0];
+      if (first) openRoom(first.id);
+      else toast('还没有房间 · 点左下角铅笔去画一个');
     });
 
     /* 外观设置两个入口共用同一个 openSettings：左下角那条 + 窄屏时右上角补位的齿轮 */
@@ -6302,8 +6387,8 @@
   /* ★ 老设备实体迁移：给没有 entities 数组的设备补全 device_id + 兄弟实体
      升级到新版后自动跑一次，跑完写回 localStorage，让旧户型图也能匹配 DEVICE_TEMPLATES */
   function migrateDeviceEntities() {
-    const hass = window.hass;
-    if (!hass || typeof hass.callWS !== 'function') return;  // WS 还没连上，跳过
+    const h = hass();                                       // ★ 之前写成 window.hass（永远是 undefined），迁移从没跑过
+    if (!h || typeof h.callWS !== 'function') return;       // WS 还没连上，跳过
     const devs = window.LH && window.LH.devices;
     if (!Array.isArray(devs) || !devs.length) return;
 
@@ -6312,7 +6397,7 @@
     if (!needMigrate.length) return;  // 全部迁移过了
 
     // 异步查 WS
-    hass.callWS({ type: 'config/entity_registry/list' }).then((ents) => {
+    h.callWS({ type: 'config/entity_registry/list' }).then((ents) => {
       if (!Array.isArray(ents)) return;
       let changed = false;
       for (const d of needMigrate) {

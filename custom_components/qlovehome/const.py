@@ -25,8 +25,9 @@ API_TIMER_URL = "/api/qlh/timer" # REST 兜底读写「定时 / 倒计时」
 API_AUDIT_URL = "/api/qlh/audit" # REST 兜底读取「操作记录」
 API_SERVICE_URL = "/api/qlh/service"  # REST 兜底「设备操控（走后端记审计）」
 
-# 定时任务在 HA 服务器上跑（关面板 / 退出账号也照常执行）
-TIMER_KEY = "timers"                        # 配置文件里的段名
+# 配置文件里的「运行时段」：只由各自的接口写，整份保存配置时必须原样保留
+UI_KEY = "ui"                               # 界面设置（主题 / 字号 / 待机 …）
+TIMER_KEY = "timers"                        # 定时任务
 TIMER_EVENT = "qlovehome_timers_changed"    # 定时变化事件（前端刷新用）
 # HA 停机期间到点的任务：12 小时内补执行，更久的直接丢弃
 TIMER_CATCHUP_SECONDS = 12 * 3600

@@ -175,7 +175,8 @@ python gen_qlovehome_data.py
 
 ```
 QLovehome/
-├── .github/workflows/validate.yaml   # CI: HACS + Python + JS 语法校验
+├── .github/workflows/validate.yaml   # CI: HACS + Python + JS + 三份副本一致性 + 版本号
+├── scripts/sync-www.ps1              # 前端同步到两个发布目录（带 SHA256 校验）
 ├── .gitignore
 ├── .hacsignore
 │
@@ -230,11 +231,11 @@ QLovehome/
 # 本地静态服务器（改前端时预览）
 py -m http.server 8765 --directory qlovehome/
 
-# 改完要同步到 3 个位置（前端代码三份副本保持一致）
-Copy-Item qlovehome\qlovehome.js,qlovehome\qlovehome-editor.js,qlovehome\qlovehome.css,qlovehome\qlovehome-data.js,qlovehome\index.html custom_components\qlovehome\www\ -Force
-Copy-Item qlovehome\*.js,qlovehome\*.css,qlovehome\index.html qlovehome_addon\www\ -Force
+# 改完同步到两个发布目录（带 SHA256 校验，三份不一致会直接报错）
+pwsh -File scripts/sync-www.ps1
 
-# CI 自动校验：HACS validation · Python 语法 · JS 语法 · manifest.json
+# CI 自动校验：HACS validation · Python 语法（含 Add-on 后端）· JS 语法（三份副本）
+#             · 三份前端逐字节一致 · JSON/YAML 可解析 · 版本号四处一致
 ```
 
 ### 核心几何算法
@@ -263,7 +264,7 @@ Copy-Item qlovehome\*.js,qlovehome\*.css,qlovehome\index.html qlovehome_addon\ww
 | 图标有但点不动 | 该设备的 HA 服务不存在 | HA → **开发者工具 → 服务** → 搜该设备 → 手动触发试试 |
 | 改了没生效 | 浏览器缓存 | `?v=N` 加 1；还不行 Ctrl+Shift+R 硬刷新 |
 | 手机侧栏不见 | 正常：≤900px 窄屏模式自动隐藏 | |
-| 墙体太厚 | `LH.plan.wallW` 默认 3px | 编辑器里改房间形状后重新生成，或 Console 输 `LH.plan.wallW=10` |
+| 墙体太厚 | `LH.plan.wallW` 默认 10（画布单位，约 1.5% 宽度） | 编辑器里改房间形状后重新生成，或 Console 输 `LH.plan.wallW=6` |
 | 待机时间想调 | 设置面板 | 设置 → 待机时间面板 |
 | 体感温度显示 `≈` | 该天气实体没提供 `apparent_temperature`，用的是公式估算 | 换和风 / OWM / AccuWeather 等自带体感的集成，或忽略 |
 
@@ -273,6 +274,8 @@ Copy-Item qlovehome\*.js,qlovehome\*.css,qlovehome\index.html qlovehome_addon\ww
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| **v1.4.3** | 2026-11-06 | 🔄 **对齐 Home Assistant Core 2026.11 / 最新 HAOS**：① Add-on 基础镜像 `amd64-base:3.20` → `{arch}-base:3.22`（原写法把架构写死成 amd64，aarch64 设备会拉到错架构镜像）；② 移除已弃用的 `dt_util.utcnow()`，改用 `dt_util.now(timezone.utc)`；③ `manifest.json` 补 `homeassistant: 2025.1.0` 最低版本声明；④ 核查并确认其余接口（`async_register_static_paths` / `websocket_api.async_register_command` / `frontend.async_register_built_in_panel` / Ingress / Supervisor WebSocket）在 2026.11 下仍有效；⑤ 适配 2026.11 **实体命名重构**（`friendly_name` 变为「设备名 + 实体名」）——前端已有的去设备名前缀逻辑可直接覆盖，无需改代码，仅确认不会出现名字重复 |
+| **v1.4.2** | 2026-11-05 | 🩹 **修复一批会静默出错的问题**：① 概览设置保存必抛 `RangeError`（`const $` 自遮蔽递归）；② 编辑器保存会把服务器配置里的 `ui` 段整段删掉（换设备丢主题/字号/待机）——两个后端现在都保留 `timers` + `ui`；③ 集成模式下「最近动态」永远为空（`with_suffix` 抛 `ValueError`）；④ 复合设备开关方向反了（`gas`/`unlocked` 算「开」但点击只认 `on`）、门锁被当成 `switch` 下发；⑤ 主实体是 climate 的设备「添加子设备」必崩；⑥ 删房间不清设备/读数引用、编辑器白屏；⑦ 触摸屏完全画不了房/拖不动（全量改 Pointer Events + `touch-action`）；⑧ 老设备自动迁移用了不存在的 `window.hass`，从没执行过；⑨ 加水印式 XSS：房间名/实体名/选项值直接拼 `innerHTML`，统一加 `esc()`。<br>🔒 **安全**：保存配置接口需要管理员（WS `require_admin` + REST 403），编辑器入口按 `is_admin` 隐藏；Add-on 直连端口默认拒绝（仅 Ingress / 本机 / `QLH_API_TOKEN`）。<br>⚡ **优化**：配置写入加锁（消除 save_config / save_ui 丢更新）、保存 600ms 防抖、几何膨胀改可分离两趟（大 pad 不再卡主线程）、页面隐藏时停止 2s 重绘、滑块静默期按实体记 8s、定时支持 cover/valve。<br>🧰 **工程**：新增 `scripts/sync-www.ps1` 三份前端同步 + SHA256 校验，CI 增加 Add-on 后端/两份副本/JSON-YAML/版本号一致性检查 |
 | **v1.4.1** | 2026-10-29 | 🔧 **加载项安装修复**：`repository.yaml` 移到仓库根（否则 Supervisor 提示「无效的加载项仓库」）；移除 `config.yaml` 里的 `image:` 字段（无预构建镜像，改为 Supervisor 本地构建）；补 `web.get("/")` 根路由，修复 Ingress 面板打开显示 404；🧩 补齐 HACS brands 图标（`brand/icon.png` + `icon@2x.png`），CI 10/10 通过；📚 README / USER_GUIDE / info.md / 加载项 README 全面校对（修正遗留 `lovehome` 旧命名、`gen_qlovehome_data.py` 文件名、路径、localStorage 过时描述等） |
 | **v1.4.0** | 2026-10-28 | ⭐ **新增 HAOS Add-on 模式**（独立 Python 进程 + HA WebSocket 连接 + Ingress 侧边栏，自包含 `qlovehome_addon/` 目录）；🗂️ 设备操控统一走后端 `/api/qlh/service`（两种模式都带审计日志），失败才回落直接 `hass.callService()`；📝 新增 **最近动态** 面板（底部 tab 栏，自动记录设备操控、定时设置、定时到点执行，JSONL 存服务器，支持事件类型筛选）；🔌 子设备绑定（热水器绑水量传感器、灯绑子灯组等，编辑器里可添加，子设备自动从户型图剔除）；❄️ 空调面板新增 **扫风模式**（读 `swing_modes` 属性，有才显示按钮）；🏷️ 版本号改从 `manifest.json` 动态读取，关于页面实时跟随更新 |
 | **v1.3.4** | 2026-10-28 | 🏠 默认模板补上**过道 + 卫生间**（6 个房间铺满画布，每房一盏示例灯）；🐛 修复 HA 顶栏隐藏时报 `getElementById is not a function`（逐层扫描 shadow root 时对 Document 兼容取样式节点）；🩹 服务器配置只剩 `timers` 段时不再被误判为「已配置」，可正常回落到默认模板 |

@@ -92,12 +92,30 @@ QLovehome 有两套后端实现，共用同一套前端和 API 接口：
 
 > Supervisor 会定期备份 `/data` 目录，HA 恢复后配置不丢。
 
+## 接口与安全
+
+| 接口 | 用途 |
+|---|---|
+| `GET /api/qlh/health` | 存活探针（Supervisor `watchdog` 靠它自动拉起挂掉的进程） |
+| `GET /api/qlh/status` | HA WebSocket 连接状态 / 已缓存实体数 / 定时任务数（排错用） |
+| `/api/qlh/config` · `/api/qlh/ui` · `/api/qlh/timer` · `/api/qlh/audit` · `/api/qlh/service` | 和集成版完全一致 |
+
+**默认只允许 Supervisor Ingress（带 `X-Ingress-Path`）和本机回环访问。**
+如果把 `8765/tcp` 端口映射到局域网，需要显式二选一：
+
+- 设置环境变量 `QLH_API_TOKEN=<token>`，请求带 `Authorization: Bearer <token>`
+- 或设置 `QLH_ALLOW_DIRECT=1`（不鉴权，仅建议在完全可信的内网使用）
+
+> 这个限制是为了避免「端口暴露 = 整栋房子的灯和门锁谁都能控制」。
+
 ## 硬件架构
 
 | 架构 | 支持 |
 |---|---|
 | `aarch64` | ✅ 树莓派 4/5 · HAOS Green |
 | `amd64` | ✅ 家用 x86 主机 · 虚拟机 |
+
+基础镜像：`ghcr.io/home-assistant/{arch}-base:3.22`（构建时由 Supervisor 按架构自动替换，与 Home Assistant Core 2026.x 所用 Alpine 版本一致）。运行时依赖仅 `python3` + `py3-aiohttp`（Alpine community 预编译包），无 pip 编译，构建快。
 
 ## 问题反馈
 
