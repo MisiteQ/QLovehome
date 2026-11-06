@@ -75,18 +75,36 @@ $zips = @(
 foreach ($z in $zips) {
     $dest = Join-Path $out $z.Name
     if (Test-Path $dest) { Remove-Item $dest -Force }
-    # 用 ZipFile 从目录创建，保证条目里没有外层包裹目录
-    [System.IO.Compression.ZipFile]::CreateFromDirectory($z.Src, $dest, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+    # 注意：不能用 ZipFile.CreateFromDirectory / Compress-Archive，
+    # .NET Framework 会把目录分隔符写成反斜杠，Linux 解压后 "www\index.html"
+    # 会变成一个文件名而不是 www/ 目录，集成因此找不到前端文件。
+    # 这里手工写条目，强制使用正斜杠。
+    $srcRoot = (Resolve-Path $z.Src).Path.TrimEnd('\')
+    $zip = [System.IO.Compression.ZipFile]::Open($dest, 'Create')
+    try {
+        foreach ($f in Get-ChildItem $z.Src -Recurse -File) {
+            $rel = $f.FullName.Substring($srcRoot.Length + 1).Replace('\', '/')
+            $entry = $zip.CreateEntry($rel, [System.IO.Compression.CompressionLevel]::Optimal)
+            $es = $entry.Open()
+            $fs = [System.IO.File]::OpenRead($f.FullName)
+            try { $fs.CopyTo($es) } finally { $fs.Dispose(); $es.Dispose() }
+        }
+    } finally { $zip.Dispose() }
     $size = [math]::Round((Get-Item $dest).Length / 1MB, 2)
     $hash = (Get-FileHash $dest -Algorithm SHA256).Hash
     Write-Host ("  {0}  {1} MB  {2}" -f $z.Name, $size, $hash) -ForegroundColor Green
 }
 
-# ── 结构自检 ────────────────────────────────────────────────
+# ── 结构自检（含分隔符检查） ────────────────────────────────
 foreach ($z in $zips) {
     $a = [System.IO.Compression.ZipFile]::OpenRead((Join-Path $out $z.Name))
-    $top = @($a.Entries | ForEach-Object { ($_.FullName -split '[\\/]')[0] } | Sort-Object -Unique)
+    $top = @($a.Entries | ForEach-Object { ($_.FullName -split '/')[0] } | Sort-Object -Unique)
+    $bad = @($a.Entries | Where-Object { $_.FullName -match '\\' }).Count
     $a.Dispose()
+    if ($bad -gt 0) {
+        Write-Host ("  {0} 含 {1} 个反斜杠条目，Linux 解压会出错！" -f $z.Name, $bad) -ForegroundColor Red
+        exit 1
+    }
     Write-Host ("  {0} 首层: {1}" -f $z.Name, ($top -join ', ')) -ForegroundColor DarkGray
 }
 
