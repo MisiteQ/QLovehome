@@ -1,6 +1,6 @@
 # QLoveHome · 使用帮助（详细版）
 
-> **适用版本**：v1.4.4  
+> **适用版本**：v1.4.5  
 > **适用人群**：Home Assistant 2025.1+ / HAOS 用户（已在 Core 2026.11 上验证）  
 > **前置条件**：已安装 Home Assistant，有一台平板（门口 / 客厅常亮）
 
@@ -65,7 +65,7 @@
 3. 类别：**集成**
 4. 搜索 "QLovehome" → **下载** → 完成后 **重载**
 5. **设置 → 设备与服务 → 添加集成 → QLovehome** → 点「提交」
-6. 侧边栏自动出现入口。如果没出现 → Dashboard 手动加 iframe 卡片 → `/qlovehome/www/index.html`
+6. 侧边栏自动出现入口。如果没出现 → Dashboard 手动加 iframe 卡片 → `/qlh/www/index.html`
 
 ### 方式 C：纯 iframe（最简，但功能受限）
 
@@ -73,12 +73,12 @@
 
 ```bash
 # 把前端文件复制到 HA 的 www 目录
-cp -r custom_components/qlovehome/www/ /config/www/qlovehome/
+cp -r custom_components/qlovehome/www/ /config/www/qlh/
 ```
 
 Dashboard → **网页卡片（iframe）** → 地址：
 ```
-/local/qlovehome/index.html
+/local/qlh/index.html
 ```
 
 > ⚠️ 这种方式**没有后端**，配置只存浏览器 localStorage（换浏览器/清缓存会丢），定时任务不会在后台执行。不推荐长期用。
@@ -301,7 +301,7 @@ python gen_qlovehome_data.py
 | **Supervisor 提示「无效的加载项仓库」** | 仓库根缺 `repository.yaml` | 用最新代码，`repository.yaml` 已在仓库根目录 |
 | **Add-on 构建失败 / 卡住** | 拉基础镜像或 Alpine 包慢、网络不通 | 给 HA 配 Docker 镜像加速；看「加载项 → 日志」的具体报错 |
 | **Add-on 启动后侧边栏没入口** | Ingress 面板未注册 / 缓存 | 重启加载项；清浏览器缓存；或从「加载项 → QLovehome → 打开 WEB UI」进入 |
-| 侧边栏没出现 QLovehome（集成模式） | panel 注册可能失败（非致命） | Dashboard 手动加 iframe 卡片 → `/qlovehome/www/index.html` |
+| 侧边栏没出现 QLovehome（集成模式） | panel 注册可能失败（非致命） | Dashboard 手动加 iframe 卡片 → `/qlh/www/index.html` |
 | 页面空白 | iframe 地址写错 / 文件没传 | 确认 Dashboard 卡片 URL；确认 `/config/www/qlovehome/` 下有 index.html |
 | 全是「—」 | 实体 ID 没换成你的 | 打开开发者工具 → 控制台输 `LH.rooms.map(r=>r.lxs)` 看实际读的是什么 |
 | 图标有但点不动 | 该设备的 HA 服务不存在 | HA → **开发者工具 → 服务** → 搜该设备 → 手动触发试试 |
@@ -331,7 +331,7 @@ localStorage        // 只看启动缓存（真实配置在服务器）
 ## 目录结构速查（用户版 zip）
 
 ```
-QLovehome-v1.4.4/                        # 注意：zip 内没有这一层，以下是解压后的完整包结构
+QLovehome-v1.4.5/                        # 注意：zip 内没有这一层，以下是解压后的完整包结构
 ├── repository.yaml                       # ← Supervisor 加载项仓库标识（必须在根）
 ├── hacs.json                             # HACS 集成元信息
 │

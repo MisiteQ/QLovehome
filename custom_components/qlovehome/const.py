@@ -17,7 +17,10 @@ AUDIT_MAX_ENTRIES = 2000          # 读取接口最多返回最近 2000 条
 LEGACY_STORAGE_DIR = "lovehome"
 LEGACY_CONFIG_FILE = "config.json"
 
-PANEL_URL = "/qlovehome/www"     # 前端静态文件挂载路径
+# 前端静态文件挂载路径
+# 注意：绝对不能放在侧边栏面板路径（PANEL_PATH）下面，否则访问 /qlovehome/www/index.html
+# 时会被 /qlovehome 面板路由先命中，面板在自己的 iframe 里再加载一次自己，无限嵌套。
+PANEL_URL = "/qlh/www"
 PANEL_PATH = "qlovehome"         # 侧边栏 URL 路径
 API_URL = "/api/qlh/config"      # REST 兜底读写接口
 API_UI_URL = "/api/qlh/ui"       # REST 兜底读写「界面设置」

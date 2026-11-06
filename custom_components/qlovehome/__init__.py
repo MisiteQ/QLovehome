@@ -349,6 +349,15 @@ async def _async_register_static(hass: HomeAssistant) -> None:
     store = hass.data.setdefault(DOMAIN, {})
     if store.get("static"):
         return
+    # 防呆：静态目录如果挂在面板路径下面，访问静态页会被面板路由吞掉，
+    # 面板会在自己的 iframe 里再加载一次自己，表现为「HA 无限套娃」。
+    if PANEL_URL == f"/{PANEL_PATH}" or PANEL_URL.startswith(f"/{PANEL_PATH}/"):
+        _LOGGER.error(
+            "PANEL_URL(%s) 不能位于面板路径 /%s 之下，已跳过静态目录注册",
+            PANEL_URL,
+            PANEL_PATH,
+        )
+        return
     www_dir = Path(__file__).parent / "www"
     try:
         if hasattr(hass.http, "async_register_static_paths"):
@@ -360,8 +369,9 @@ async def _async_register_static(hass: HomeAssistant) -> None:
         else:  # 兼容旧版 HA
             hass.http.register_static_path(PANEL_URL, str(www_dir), cache_headers=False)
         store["static"] = True
+        _LOGGER.info("QLovehome 前端静态目录已注册: %s -> %s", PANEL_URL, www_dir)
     except Exception as exc:  # noqa: BLE001 - 静态目录失败不该拖垮整个集成
-        _LOGGER.warning("前端静态目录注册失败: %s", exc)
+        _LOGGER.error("前端静态目录注册失败（面板会显示空白/套娃）: %s", exc)
 
 
 @callback

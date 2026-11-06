@@ -93,19 +93,19 @@ https://github.com/MisiteQ/QLovehome
    - 侧边栏自动出现 **QLovehome** 入口 → 点进去就是
    - 如果没出现 → Dashboard 添加「网页卡片（iframe）」→ 地址：
      ```
-     /qlovehome/www/index.html
+     /qlh/www/index.html
      ```
 
 ### 方式三：纯 iframe（最简）
 
 ```bash
 # 复制前端文件到 HA www 目录
-cp -r custom_components/qlovehome/www/ /config/www/qlovehome/
+cp -r custom_components/qlovehome/www/ /config/www/qlh/
 ```
 
 Dashboard → 网页卡片（iframe）→ 地址：
 ```
-/local/qlovehome/index.html
+/local/qlh/index.html
 ```
 
 ---
@@ -258,7 +258,7 @@ pwsh -File scripts/sync-www.ps1
 | **Supervisor 添加仓库提示「无效的加载项仓库」** | 仓库里找不到根级 `repository.yaml` | 用最新代码（`repository.yaml` 已移到仓库根目录） |
 | **Add-on 安装卡在构建 / 构建失败** | 首次构建需拉 HA 基础镜像 + Alpine 包，网络慢 | 换 HA 的 Docker 镜像源后重试；看「加载项 → QLovehome → 日志」具体报错 |
 | **Add-on 启动后侧边栏没出现** | Ingress 面板未注册 / 浏览器缓存 | 重启加载项；清缓存；或直接访问 `http://<ha-ip>:8123/api/hassio_ingress/` 下对应链接 |
-| 侧边栏没出现 QLovehome（集成模式） | panel 注册可能失败 | Dashboard 手动加 iframe 卡片 → `/qlovehome/www/index.html` |
+| 侧边栏没出现 QLovehome（集成模式） | panel 注册可能失败 | Dashboard 手动加 iframe 卡片 → `/qlh/www/index.html` |
 | 页面空白 | iframe 地址错 / 文件没传 / `?v=N` 没加 | 确认 Dashboard 卡片 URL；确认 `/config/www/qlovehome/` 下有 index.html |
 | 全是「—」 | 实体 ID 没换成你的 | 打开开发者工具 → 控制台输 `LH.rooms.map(r=>r.lxs)` 看实际读的是什么 |
 | 图标有但点不动 | 该设备的 HA 服务不存在 | HA → **开发者工具 → 服务** → 搜该设备 → 手动触发试试 |
@@ -274,6 +274,7 @@ pwsh -File scripts/sync-www.ps1
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| **v1.4.5** | 2026-11-06 | 🐛 **修复「打开后 HA 无限套娃」**：前端静态目录原先挂在 `/qlovehome/www`，正好在侧边栏面板路径 `/qlovehome` 之下，访问静态页时被面板路由先命中，面板就在自己的 iframe 里再加载一次自己。现已改为 `/qlh/www`（与面板路径无关），并加了防呆检查——以后谁再把静态目录挂到面板路径下面会直接报错跳过。文档里的手动 iframe 地址同步改为 `/qlh/www/index.html`（复制到 www 目录的场景是 `/local/qlh/index.html`） |
 | **v1.4.4** | 2026-11-06 | 📦 **修复发布包结构**：原先 zip 多包了一层 `QLovehome-vX.Y.Z/`，导致 `manifest.json` 落在第 3 层，冬瓜 HAOS 伴侣这类「从压缩包安装集成」的工具报「压缩包中未找到 manifest.json」。现在同时发布两种布局——`QLovehome-integration-vX.Y.Z.zip`（首层即 `manifest.json`，供此类工具）与 `QLovehome-vX.Y.Z.zip`（首层为 `custom_components/`，完整包）；新增 `scripts/package.ps1` 统一打包，避免手工压缩再次出错。集成代码与 v1.4.3 完全一致 |
 | **v1.4.3** | 2026-11-06 | 🔄 **对齐 Home Assistant Core 2026.11 / 最新 HAOS**：① Add-on 基础镜像 `amd64-base:3.20` → `{arch}-base:3.22`（原写法把架构写死成 amd64，aarch64 设备会拉到错架构镜像）；② 移除已弃用的 `dt_util.utcnow()`，改用 `dt_util.now(timezone.utc)`；③ `manifest.json` 补 `homeassistant: 2025.1.0` 最低版本声明；④ 核查并确认其余接口（`async_register_static_paths` / `websocket_api.async_register_command` / `frontend.async_register_built_in_panel` / Ingress / Supervisor WebSocket）在 2026.11 下仍有效；⑤ 适配 2026.11 **实体命名重构**（`friendly_name` 变为「设备名 + 实体名」）——前端已有的去设备名前缀逻辑可直接覆盖，无需改代码，仅确认不会出现名字重复 |
 | **v1.4.2** | 2026-11-05 | 🩹 **修复一批会静默出错的问题**：① 概览设置保存必抛 `RangeError`（`const $` 自遮蔽递归）；② 编辑器保存会把服务器配置里的 `ui` 段整段删掉（换设备丢主题/字号/待机）——两个后端现在都保留 `timers` + `ui`；③ 集成模式下「最近动态」永远为空（`with_suffix` 抛 `ValueError`）；④ 复合设备开关方向反了（`gas`/`unlocked` 算「开」但点击只认 `on`）、门锁被当成 `switch` 下发；⑤ 主实体是 climate 的设备「添加子设备」必崩；⑥ 删房间不清设备/读数引用、编辑器白屏；⑦ 触摸屏完全画不了房/拖不动（全量改 Pointer Events + `touch-action`）；⑧ 老设备自动迁移用了不存在的 `window.hass`，从没执行过；⑨ 加水印式 XSS：房间名/实体名/选项值直接拼 `innerHTML`，统一加 `esc()`。<br>🔒 **安全**：保存配置接口需要管理员（WS `require_admin` + REST 403），编辑器入口按 `is_admin` 隐藏；Add-on 直连端口默认拒绝（仅 Ingress / 本机 / `QLH_API_TOKEN`）。<br>⚡ **优化**：配置写入加锁（消除 save_config / save_ui 丢更新）、保存 600ms 防抖、几何膨胀改可分离两趟（大 pad 不再卡主线程）、页面隐藏时停止 2s 重绘、滑块静默期按实体记 8s、定时支持 cover/valve。<br>🧰 **工程**：新增 `scripts/sync-www.ps1` 三份前端同步 + SHA256 校验，CI 增加 Add-on 后端/两份副本/JSON-YAML/版本号一致性检查 |

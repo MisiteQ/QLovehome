@@ -45,16 +45,16 @@ URL：`https://github.com/MisiteQ/QLovehome`
 
 1. 设置 → 设备与服务 → 添加集成 → **QLovehome**
 2. 点「提交」，侧边栏自动出现入口
-3. 如果没出现，Dashboard 手动加「网页卡片」→ `/qlovehome/www/index.html`
+3. 如果没出现，Dashboard 手动加「网页卡片」→ `/qlh/www/index.html`
 
 ### 纯 iframe（最简）
 
 ```bash
 # 前端文件复制到 HA www 目录
-cp -r custom_components/qlovehome/www/ /config/www/qlovehome/
+cp -r custom_components/qlovehome/www/ /config/www/qlh/
 ```
 
-Dashboard → 网页卡片 → 地址：`/local/qlovehome/index.html`
+Dashboard → 网页卡片 → 地址：`/local/qlh/index.html`
 
 ---
 
