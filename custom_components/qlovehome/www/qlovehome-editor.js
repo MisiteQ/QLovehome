@@ -224,8 +224,56 @@
 
   /* 修改后调用：标记 dirty 并延迟保存 */
   function markDirty() {
+    pushUndo();
     editState.dirty = true;
     persistSoon();
+  }
+
+  /* ── 撤销 / 重做（Ctrl+Z / Ctrl+Shift+Z）──
+     每次改动前把「上一份配置」压栈；最多 30 步，避免大底图把内存吃满。
+     lastSnap 始终保存「最近一次保存后的状态」，所以撤销永远回到上一次真实的改动之前。 */
+  const UNDO_MAX = 30;
+  let undoStack = [], redoStack = [], lastSnap = null;
+  function snapCfg() {
+    try { return JSON.stringify(exportConfig()); } catch (e) { return null; }
+  }
+  function pushUndo() {
+    try {
+      const cur = snapCfg();
+      if (cur == null) return;
+      if (lastSnap != null && lastSnap !== cur) {
+        undoStack.push(lastSnap);
+        if (undoStack.length > UNDO_MAX) undoStack.shift();
+        redoStack = [];
+      }
+      lastSnap = cur;
+    } catch (e) { /* 忽略 */ }
+  }
+  function applySnap(s) {
+    if (!s) return false;
+    try { applyConfigObject(JSON.parse(s)); } catch (e) { return false; }
+    persist();
+    rerenderEditorTab();
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
+    return true;
+  }
+  function undo() {
+    if (!undoStack.length) { toastHint('没有可撤销的操作了'); return; }
+    const cur = snapCfg();
+    const prev = undoStack.pop();
+    if (cur != null) redoStack.push(cur);
+    lastSnap = prev;
+    applySnap(prev);
+    toastHint('已撤销');
+  }
+  function redo() {
+    if (!redoStack.length) { toastHint('没有可重做的操作了'); return; }
+    const cur = snapCfg();
+    const next = redoStack.pop();
+    if (cur != null) undoStack.push(cur);
+    lastSnap = next;
+    applySnap(next);
+    toastHint('已重做');
   }
 
   /* 家人可挂多台设备：统一读 entities 数组，兼容旧的单 entity */
@@ -489,13 +537,16 @@
 
     /* ── 画布变换：空格拖动平移 + 滚轮缩放 ── */
     let spaceHeld = false, panning = false;
-    let cx = 0, cy = 0, tx = 0, ty = 0, scale = 1;
+    /* 缩放/平移记在 editState 里：切 tab / 重绘后不再一夜回到 1:1 */
+    const view = editState.plan.view || (editState.plan.view = { tx: 0, ty: 0, scale: 1 });
+    let cx = 0, cy = 0, tx = view.tx, ty = view.ty, scale = view.scale;
     const isInputFocused = () => {
       const el = document.activeElement;
       return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
     };
     const applyTransform = () => {
       svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+      view.tx = tx; view.ty = ty; view.scale = scale;
     };
     const resetTransform = () => { cx = 0; cy = 0; tx = 0; ty = 0; scale = 1; applyTransform(); };
     document.addEventListener('keydown', (e) => {
@@ -540,6 +591,7 @@
     }, { passive: false });
     // Ctrl+0 重置缩放：把函数暴露到 canvas 上
     canvas._resetTransform = resetTransform;
+    applyTransform();          // 恢复上次的缩放/平移
 
     // 底图栏
     $('#lhEdPhotoBarSlot', wrap).replaceWith(buildPhotoBar());
@@ -1827,23 +1879,30 @@
     });
 
     // 点击外部关闭
-    document.addEventListener('pointerdown', (e) => {
+    const onDocDown = (e) => {
       if (!pickerOpen || dropdown.hidden) return;
       if (dropdown.contains(e.target)) return;        // 点在 dropdown 里 → 不关
       if (wrapper.contains(e.target)) return;         // 点在 input 里 → 不关（click 事件自己处理）
       dropdown.hidden = true;
       pickerOpen = false;
-    });
+    };
+    document.addEventListener('pointerdown', onDocDown);
 
     // resize / scroll 时重定位
-    window.addEventListener('resize', () => { if (!dropdown.hidden) positionDropdown(); });
+    const onResize = () => { if (!dropdown.hidden) positionDropdown(); };
+    window.addEventListener('resize', onResize);
 
     // 初始值校验
     updateStatus();
 
     return {
       wrapper, setValue, searchInp, updateStatus,
-      destroy() { dropdown.remove(); pickerOpen = false; }
+      destroy() {
+        dropdown.remove();
+        pickerOpen = false;
+        document.removeEventListener('pointerdown', onDocDown);
+        window.removeEventListener('resize', onResize);
+      }
     };
   }
 
@@ -3364,6 +3423,14 @@
     });
     // 注入编辑入口（轮询等 boot 跑完 #fnSet 出现）
     pollInject();
+    /* 撤销 / 重做：只在编辑器打开时接管 Ctrl+Z / Ctrl+Shift+Z（Ctrl+Y 同重做） */
+    document.addEventListener('keydown', (e) => {
+      if (!editorRoot || !editorRoot.classList.contains('open')) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = String(e.key || '').toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+    });
   }
 
   /* 等 qlovehome.js boot 完成后再触发重绘（boot 会设置 window.QLOVEHOME_BOOTED） */

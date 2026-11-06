@@ -159,11 +159,20 @@
       return pair[1] ? localStorage.getItem(pair[1]) : null;
     } catch (e) { return null; }
   }
+  /* 每块屏可以有自己的一套外观：开启后只在本地写，不上传也不接受服务器覆盖 */
+  const LOCAL_ONLY_KEY = 'qlh.localOnly';
+  function localOnlyUI() {
+    try { return localStorage.getItem(LOCAL_ONLY_KEY) === '1'; } catch (e) { return false; }
+  }
+  function setLocalOnly(on) {
+    try { localStorage.setItem(LOCAL_ONLY_KEY, on ? '1' : '0'); } catch (e) { /* 忽略 */ }
+    if (!on) queueUiSave();          // 关掉时把本机这份推回服务器
+  }
   function uiWrite(name, val, noSync) {
     const pair = UI_MAP[name];
     if (!pair) return;
     try { localStorage.setItem(pair[0], val); } catch (e) { /* 隐私模式忽略 */ }
-    if (!noSync) queueUiSave();
+    if (!noSync && !localOnlyUI()) queueUiSave();
   }
   function uiCollect() {
     const out = {};
@@ -208,6 +217,7 @@
   }
   function uiApplyRemote(ui) {
     if (!ui || typeof ui !== 'object') return false;
+    if (localOnlyUI()) return false;         // 本机外观优先，别被别的平板覆盖
     let hit = false;
     Object.keys(UI_MAP).forEach((n) => {
       if (ui[n] == null) return;
@@ -347,6 +357,24 @@
   const TDOMS = ['switch', 'light', 'fan', 'cover', 'media_player', 'climate',
                  'water_heater', 'humidifier', 'siren', 'valve'];
   const TOPTS = [15, 30, 60, 120];
+  /* 重复定时：每天 / 每周（选星期几）。星期值用 1..7（周一=1），和 Date#getDay 的 0=周日区分开 */
+  const DOW = [{ v: 1, n: '一' }, { v: 2, n: '二' }, { v: 3, n: '三' }, { v: 4, n: '四' },
+               { v: 5, n: '五' }, { v: 6, n: '六' }, { v: 7, n: '日' }];
+  /* 下一次触发时间（毫秒）：每天 +24h；每周滚到 days 里下一个星期几 */
+  function nextRepeatMs(it) {
+    const MS = 86400000;
+    let next = it.end + MS;
+    if (it.rep === 'weekly' && (it.days || []).length) {
+      for (let i = 0; i < 8; i++) {
+        const dow = new Date(next).getDay() || 7;
+        if (it.days.indexOf(dow) >= 0) break;
+        next += MS;
+      }
+    }
+    const now = Date.now();
+    while (next <= now) next += MS;
+    return next;
+  }
   const THINT = '先选「关 / 开」，再选时长（也可以直接输入分钟数）→ 到点自动执行。' +
                 '定时保存在 HA 服务器上，关掉面板、退出账号也照样执行。';
   function timersOf() {
@@ -371,10 +399,13 @@
       .then((d) => (d && d.timers) || {})
       .catch(() => null);
   }
-  function apiTimerSet(e, end, act, name) {
+  function apiTimerSet(e, end, act, name, extra) {
     if (!haToken()) return Promise.resolve(false);
     return apiFetch('/api/qlh/timer', {
-      method: 'POST', body: JSON.stringify({ entity_id: e, end, act, name: name || '' })
+      method: 'POST', body: JSON.stringify({
+        entity_id: e, end, act, name: name || '',
+        rep: (extra && extra.rep) || 'once', days: (extra && extra.days) || []
+      })
     }).then((r) => r.ok).catch(() => false);
   }
   function apiTimerClear(e) {
@@ -391,13 +422,15 @@
     }
     return apiTimerLoad();
   }
-  function remoteTimerSet(e, end, act, name) {
+  function remoteTimerSet(e, end, act, name, extra) {
     const h = hass();
+    const rep = (extra && extra.rep) || 'once';
+    const days = (extra && extra.days) || [];
     if (h && typeof h.callWS === 'function') {
-      return h.callWS({ type: 'qlovehome/set_timer', entity_id: e, end, act, name: name || '' })
-        .then(() => true).catch(() => apiTimerSet(e, end, act, name));
+      return h.callWS({ type: 'qlovehome/set_timer', entity_id: e, end, act, name: name || '', rep, days })
+        .then(() => true).catch(() => apiTimerSet(e, end, act, name, extra));
     }
-    return apiTimerSet(e, end, act, name);
+    return apiTimerSet(e, end, act, name, extra);
   }
   function remoteTimerClear(e) {
     const h = hass();
@@ -452,14 +485,17 @@
     const s = Math.max(0, Math.round(ms / 1000)), m = Math.floor(s / 60);
     return (m ? m + '分' : '') + (s % 60) + '秒';
   }
-  function timerStart(e, act, min, name) {
+  function timerStart(e, act, min, name, extra) {
     if (!(min > 0)) { toast('先填一个大于 0 的分钟数'); return; }
     const end = Date.now() + min * 60000;
+    const rep = (extra && extra.rep) || 'once';
+    const days = (extra && extra.days) || [];
     const t = timersOf();
-    t[e] = { end: end, act: act, n: name || '' };
+    t[e] = { end: end, act: act, n: name || '', rep: rep, days: days };
     saveTimers(t);                              // 本机镜像：立刻显示
-    remoteTimerSet(e, end, act, name);          // ★ 真正的任务存到 HA 服务器
-    toast((name || '定时') + ' · ' + fmtMin(min) + '后' + (act === 'off' ? '关闭' : '开启'));
+    remoteTimerSet(e, end, act, name, t[e]);    // ★ 真正的任务存到 HA 服务器
+    toast((name || '定时') + ' · ' + fmtMin(min) + '后' + (act === 'off' ? '关闭' : '开启') +
+      (rep === 'daily' ? '（每天）' : rep === 'weekly' ? '（每周）' : ''));
     paintTimers();
   }
   function timerCancel(e) {
@@ -480,15 +516,19 @@
         const it = t[e];
         if (!it) return;
         if (now >= it.end) {
-          delete t[e]; dirty = true;
+          const rep = (it.rep === 'daily' || it.rep === 'weekly');
           /* 服务器应该已经执行了；接口暂时不通时本机补一刀（开关类服务幂等，重复无害） */
           if (now - it.end < 300000) {
             const ts = timerService(e, it.act === 'off' ? 'off' : 'on');
             sendControl(ts[0], ts[1], { entity_id: e },
               (it.n || '定时') + ' · ' + (it.act === 'off' ? '关闭' : '开启'));
-          } else {
+          } else if (!rep) {
             toast((it.n || e) + ' · 定时已结束');
           }
+          /* 重复任务滚到下一次（服务器也会重排，下次 syncTimers 对齐），一次性的删掉 */
+          if (rep) it.end = nextRepeatMs(it);
+          else delete t[e];
+          dirty = true;
           return;
         }
         /* 目标已经达成（要关但已经关了）→ 清掉本机显示，服务器那条也取消 */
@@ -536,6 +576,16 @@
         '<input class="tnum" type="number" inputmode="numeric" min="1" max="1440" step="1" placeholder="分钟">' +
         '<span class="th-u">分钟</span>' +
         '<button type="button" class="tok">定时</button>' +
+      '</div>' +
+      '<div class="trep">' +
+        ['once', 'daily', 'weekly'].map((r) =>
+          '<button type="button" data-rep="' + r + '"' +
+          ((t ? (t.rep || 'once') : 'once') === r ? ' class="on"' : '') + '>' +
+          (r === 'once' ? '一次' : r === 'daily' ? '每天' : '每周') + '</button>').join('') +
+      '</div>' +
+      '<div class="tdays"' + (t && t.rep === 'weekly' ? '' : ' hidden') + '>' +
+        DOW.map((d2) => '<button type="button" data-dow="' + d2.v + '"' +
+          (t && (t.days || []).indexOf(d2.v) >= 0 ? ' class="on"' : '') + '>' + d2.n + '</button>').join('') +
       '</div>';
     box.addEventListener('click', (ev) => {
       const run = box.querySelector('.trun');
@@ -543,20 +593,54 @@
       if (!b || !run) return;
       if (b.classList.contains('tcx')) { timerCancel(e); return; }
       const cur = timersOf()[e];
+      /* 当前卡片上选的重复方式 / 星期几（新设定时或改已有定时都用它） */
+      const repOn = box.querySelector('.trep button.on');
+      const repOf = () => (repOn ? repOn.dataset.rep : (cur && cur.rep) || 'once');
+      const daysOf = () => $$('.tdays button.on', box).map((x) => Number(x.dataset.dow));
+      if (b.dataset.rep) {                          /* 一次 / 每天 / 每周 */
+        const rep = b.dataset.rep;
+        $$('.trep button', box).forEach((x) => x.classList.toggle('on', x === b));
+        const daysBox = box.querySelector('.tdays');
+        if (daysBox) daysBox.hidden = rep !== 'weekly';
+        if (cur) {
+          const t2 = timersOf();
+          if (t2[e]) {
+            t2[e].rep = rep;
+            if (rep !== 'weekly') t2[e].days = [];
+            saveTimers(t2);
+            remoteTimerSet(e, t2[e].end, t2[e].act, t2[e].n || '', t2[e]);
+            paintTimers();
+          }
+        }
+        return;
+      }
+      if (b.dataset.dow) {                          /* 每周的星期几 */
+        if (!cur) { toast('先设一个定时，再选星期几'); return; }
+        const dow = Number(b.dataset.dow);
+        b.classList.toggle('on');
+        const t2 = timersOf();
+        let days = t2[e].days || [];
+        if (days.indexOf(dow) >= 0) days = days.filter((x) => x !== dow);
+        else days = days.concat([dow]).sort();
+        t2[e].days = days;
+        saveTimers(t2);
+        remoteTimerSet(e, t2[e].end, t2[e].act, t2[e].n || '', t2[e]);
+        return;
+      }
       if (b.classList.contains('tok')) {           /* 手动输入分钟数 */
         const inp = box.querySelector('.tnum');
         const min = Math.round(Number(inp && inp.value));
         if (!Number.isFinite(min) || min < 1 || min > 1440) { toast('请输入 1 ~ 1440 之间的分钟数'); return; }
         const onB = run.querySelector('.tseg button.on');
         const act = cur ? cur.act : ((onB && onB.dataset.act) || 'off');
-        timerStart(e, act, min, d.name);
+        timerStart(e, act, min, d.name, { rep: repOf(), days: daysOf() });
         return;
       }
       if (b.dataset.act) {
         const act = b.dataset.act;
         if (cur) {                     /* 已经在跑：直接改方向，时间不变 */
           const t2 = timersOf(); t2[e].act = act; saveTimers(t2);
-          remoteTimerSet(e, t2[e].end, act, t2[e].n || '');
+          remoteTimerSet(e, t2[e].end, act, t2[e].n || '', t2[e]);
           toast('定时改为到点' + (act === 'off' ? '关闭' : '开启'));
           paintTimers(); return;
         }
@@ -566,7 +650,7 @@
       if (b.dataset.min) {
         const onB = run.querySelector('.tseg button.on');
         const act = cur ? cur.act : ((onB && onB.dataset.act) || 'off');
-        timerStart(e, act, Number(b.dataset.min), d.name);
+        timerStart(e, act, Number(b.dataset.min), d.name, { rep: repOf(), days: daysOf() });
       }
     });
     /* 手动输入框里按回车 = 点「定时」 */
@@ -4661,6 +4745,14 @@
         <span class="fs-note" id="${ids.fsn}" data-fs-note></span>
         <button class="theme-btn" id="${ids.fsrst}" data-fs-reset type="button">默认 100%</button>
       </div>
+      <h3>本机外观</h3>
+      <ul>
+        <li>开启后，<b>字体大小 / 面板透明度 / 主题 / 季节 / 待机时间</b>只保存在<b>这台设备</b>，
+            不写回 HA 服务器，也不会被别的平板覆盖。适合「客厅大屏调大字号、手机保持默认」。</li>
+      </ul>
+      <div class="theme-row">
+        <button class="theme-btn${localOnlyUI() ? ' on' : ''}" id="setLocalOnly" type="button">${localOnlyUI() ? '✓ 只在本机生效' : '同步到所有设备'}</button>
+      </div>
       <h3>面板透明度</h3>
       <ul>
         <li>左栏（全屋摘要 / 房间列表）和右侧<b>房间面板</b>的底色透明度，默认 <b>75%</b>：只留一层雾面玻璃，背后的氛围光会透上来。</li>
@@ -4870,6 +4962,14 @@
       };
       txt();
       b.addEventListener('click', () => { toggleUI('pan'); txt(); });
+    });
+    /* 本机外观开关：切换后立即生效，关掉时把本机这套推回服务器 */
+    const loBtn = root.querySelector('#setLocalOnly');
+    if (loBtn) loBtn.addEventListener('click', () => {
+      setLocalOnly(!localOnlyUI());
+      loBtn.textContent = localOnlyUI() ? '✓ 只在本机生效' : '同步到所有设备';
+      loBtn.classList.toggle('on', localOnlyUI());
+      toast(localOnlyUI() ? '外观设置只保存在这台设备' : '外观设置会同步到所有设备');
     });
     /* 待机时间设置 */
     const t = getStandbyTimers();
@@ -6463,6 +6563,35 @@
     });
   }
 
+  /* ── 首次打开的三步引导（只看一次）──
+     默认模板是 6 个 demo 房间 + light.demo_*，新用户看到一屏「—」很容易直接关掉，
+     这里给一条最短路径：导入设备 → 画户型 → 摆图标。 */
+  function maybeOnboarding() {
+    try { if (localStorage.getItem('qlh.onboarded') === '1') return; } catch (e) { return; }
+    const real = (LH.devices || []).some((d) => d.entity && !/^light\.demo_/.test(d.entity));
+    if (real) { try { localStorage.setItem('qlh.onboarded', '1'); } catch (e) { /* 忽略 */ } return; }
+    const done = () => { try { localStorage.setItem('qlh.onboarded', '1'); } catch (e) { /* 忽略 */ } };
+    showLayer('欢迎使用 QLovehome', '三步把家里的设备接进来（随时可以跳过）', 'wide');
+    $('#layerBody').innerHTML = `
+      <div class="onb">
+        <div class="onb-step"><b>1 · 导入设备</b><span>左下角铅笔 → 「设备」tab → 🔍 从 HA 批量导入，勾选你家的灯 / 空调 / 窗帘 / 摄像头</span></div>
+        <div class="onb-step"><b>2 · 画户型</b><span>同一编辑器 → 「户型图」tab，用矩形 / 多边形 / 圆形把房间画出来</span></div>
+        <div class="onb-step"><b>3 · 摆上图标</b><span>把设备拖进对应房间并保存，主页就是你家；概览 / 家人 / 用电在「概览」里配</span></div>
+        <div class="onb-actions">
+          <button class="wide" id="onbStart" type="button">开始配置</button>
+          <button class="wide ghost" id="onbSkip" type="button">先看看示例</button>
+        </div>
+        <div class="onb-tip">提示：示例房间 / 灯可以随时在编辑器里删掉，不会影响已有配置。</div>
+      </div>`;
+    $('#onbStart').addEventListener('click', () => {
+      done();
+      closeLayer();
+      if (window.LHEditor && typeof window.LHEditor.open === 'function') window.LHEditor.open();
+      else toast('编辑器还没加载完，点左下角铅笔试试');
+    });
+    $('#onbSkip').addEventListener('click', () => { done(); closeLayer(); });
+  }
+
   function boot() {
     // ★ 关键：先用本机缓存秒开（localStorage 只是缓存），
     //   随后 syncFromServer() 用 HA 服务器上的配置覆盖并重绘
@@ -6524,6 +6653,8 @@
     document.dispatchEvent(new CustomEvent('QLOVEHOME_BOOTED'));
     /* ★ 再从 HA 服务器拉一次（换电脑 / 换浏览器时靠这一步还原全部配置与设置） */
     syncFromServer();
+    /* 首次打开：等布局稳定后给三步引导（不影响已有用户） */
+    setTimeout(() => { try { maybeOnboarding(); } catch (e) { /* 忽略 */ } }, 1500);
   }
 
   /* ── 编辑器触发的整体重绘（不重启定时器、不重新绑事件） ── */
