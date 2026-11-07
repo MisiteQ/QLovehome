@@ -820,6 +820,15 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .rp-head b { font-size: calc(13.5px * var(--fsk)); font-weight: 500; display: block; }
 .rp-head span { font-size: calc(11.5px * var(--fsk)); color: rgba(var(--fg), 0.6); display: block; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .rp-head .close { padding: 3px 9px; font-size: calc(12px * var(--fsk)); }
+.rp-card-btn {
+  flex: none; margin-left: auto; margin-right: 4px;
+  padding: 3px 9px; border-radius: 7px; cursor: pointer;
+  font-family: inherit; font-size: calc(11.5px * var(--fsk));
+  color: var(--amber-2); background: rgba(var(--am), 0.12);
+  border: 1px solid rgba(var(--am), 0.28); transition: all .15s;
+}
+.rp-card-btn:hover { background: rgba(var(--am), 0.2); }
+.rp-head .close { margin-left: 0; }
 .rp-body { overflow-y: auto; padding: 8px 12px 12px; }
 .rp-body::-webkit-scrollbar { width: 3px; }
 .rp-body::-webkit-scrollbar-thumb { background: rgba(var(--fg), 0.18); border-radius: 3px; }
@@ -838,6 +847,12 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 /* min-width:0 + 省略号：右侧多了「设置」按钮后，副标题不能再把条目撑宽 */
 .rp-item .rn i { display: block; font-size: calc(11px * var(--fsk)); color: var(--dim-2); font-style: normal; margin-top: 1px;
   line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rp-item .rn .rcc {
+  display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px;
+  font-size: calc(9.5px * var(--fsk)); font-style: normal; line-height: 1.5;
+  color: var(--amber-2); background: rgba(var(--am), 0.14);
+  border: 1px solid rgba(var(--am), 0.24); vertical-align: 1px;
+}
 .rp-item .rv { font-size: calc(12.5px * var(--fsk)); color: var(--dim); }
 .sw {
   width: 40px; height: 23px; border-radius: 999px; border: 1px solid var(--line);
@@ -1958,6 +1973,18 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
   background: #fff; border-color: rgba(217, 83, 79, .45); color: #c0392b;
 }
 .lh-ed-btn.danger:hover { background: #fdecea; border-color: #c0392b; color: #a52a20; }
+/* 自定义面板 YAML 编辑器 */
+.lh-yaml {
+  width: 100%; min-height: 150px; resize: vertical; box-sizing: border-box;
+  margin-top: 4px; padding: 9px 11px; border-radius: 8px;
+  border: 1px solid #d4d9e0; background: #fbfcfd; color: #2a3140;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px; line-height: 1.55; tab-size: 2;
+}
+.lh-yaml:focus { outline: none; border-color: #b08a5a; background: #fff; }
+.lh-yaml-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.lh-yaml-actions .hint { font-size: 11.5px; color: #8b93a1; }
+.lh-yaml-err { color: #c0392b; font-size: 11.5px; margin-top: 4px; }
 
 /* Tab 导航 */
 .lh-ed-tabs {

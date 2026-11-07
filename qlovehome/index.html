@@ -172,7 +172,9 @@
     <aside class="side" id="side"></aside>
     <div class="plan-wrap" id="planWrap"></div>
     <aside class="room-panel" id="roomPanel" hidden aria-label="房间信息">
-      <div class="rp-head"><div><b id="rpName">客厅</b><span id="rpMeta">—</span></div><button class="close" id="rpClose" type="button">×</button></div>
+      <div class="rp-head"><div><b id="rpName">客厅</b><span id="rpMeta">—</span></div>
+        <button class="rp-card-btn" id="rpCard" type="button" hidden>自定义面板</button>
+        <button class="close" id="rpClose" type="button">×</button></div>
       <div class="rp-body" id="rpBody"></div>
     </aside>
     <!-- 没开房间面板时，第三列这块 400px 就是常驻栏：常用设备 + 安防网关 -->
@@ -223,9 +225,10 @@
   </div>
 </main>
 
-<script src="./qlovehome-data.js?v=158"></script>
-<script src="./qlovehome.js?v=158"></script>
-<script src="./qlovehome-editor.js?v=158"></script>
+<script src="./assets/js-yaml.min.js?v=1"></script>
+<script src="./qlovehome-data.js?v=160"></script>
+<script src="./qlovehome.js?v=160"></script>
+<script src="./qlovehome-editor.js?v=160"></script>
 </body>
 </html>
 

@@ -111,6 +111,80 @@
     return n;
   };
 
+  /* ── 自定义面板（Lovelace 卡片 YAML）───────────────── */
+  function cardToYaml(card) {
+    if (!card) return '';
+    try {
+      if (window.jsyaml && typeof window.jsyaml.dump === 'function') {
+        return window.jsyaml.dump(card, { noRefs: true, lineWidth: -1, quotingType: '"' });
+      }
+    } catch (e) { /* 落到 JSON（JSON 也是合法 YAML） */ }
+    return JSON.stringify(card, null, 2);
+  }
+
+  function parseCardYaml(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+    if (!window.jsyaml || typeof window.jsyaml.load !== 'function') {
+      throw new Error('YAML 解析器未加载（assets/js-yaml.min.js）');
+    }
+    const v = window.jsyaml.load(raw);
+    if (!v || typeof v !== 'object' || Array.isArray(v)) {
+      throw new Error('必须是一个 YAML 对象');
+    }
+    if (typeof v.type !== 'string' || !v.type.trim()) {
+      throw new Error('缺少 type 字段（如 custom:qfnplus-device-card）');
+    }
+    /* popup-card 只是磁贴，点了还要再弹一层；直接换成内部设备面板 */
+    if (v.type === 'custom:qfnplus-popup-card') {
+      const out = {
+        type: 'custom:qfnplus-device-card',
+        title: v.panel_title || v.title,
+        device_id: v.device_id,
+        entry_id: v.entry_id,
+        show_diagnostics: v.show_diagnostics
+      };
+      Object.keys(out).forEach((k) => { if (out[k] === undefined) delete out[k]; });
+      toastHint('已自动改为直接展开的 Q飞牛+ 设备面板，不用再点一次', 2800);
+      return out;
+    }
+    return v;
+  }
+
+  function bindCardEditor(form, key, presetDeviceId) {
+    const ta = $('#' + key + 'Yaml', form);
+    if (!ta) return;
+    $$('[data-card-preset]', form).forEach((btn) => {
+      btn.onclick = () => {
+        const p = btn.getAttribute('data-card-preset');
+        if (p === 'qfnplus') {
+          ta.value = '# 直接展开完整设备面板（不要用 qfnplus-popup-card，它会多一层弹窗）\n' +
+            'type: custom:qfnplus-device-card\n' +
+            (presetDeviceId
+              ? 'device_id: ' + presetDeviceId + '\n'
+              : '# device_id: 从 HA「设备」页 URL 复制（可选）\n');
+        } else if (p === 'iframe') {
+          ta.value = 'type: iframe\nurl: /hassio/ingress/<addon-slug>\naspect_ratio: 75%\n';
+        }
+        ta.focus();
+      };
+    });
+  }
+
+  function cardSectionHtml(key, card, presetNote) {
+    return `
+      <hr style="border:none;border-top:1px dashed var(--bd2);margin:10px 0">
+      <label>自定义面板（可选 · Lovelace 卡片 YAML）
+        <textarea id="${key}Yaml" class="lh-yaml" spellcheck="false"
+          placeholder="type: custom:qfnplus-device-card&#10;device_id: xxxx">${esc(cardToYaml(card))}</textarea>
+      </label>
+      <div class="lh-yaml-actions">
+        <button type="button" class="lh-ed-btn" data-card-preset="qfnplus">Q飞牛+ 完整面板</button>
+        <button type="button" class="lh-ed-btn" data-card-preset="iframe">加载项页面</button>
+        <span class="hint">${esc(presetNote || '留空 = 使用 QLovehome 原生面板；支持任意 Lovelace 卡片')}</span>
+      </div>`;
+  }
+
   /* 当前户型图 Tab 的「结束绘制」回调（全局只挂一个 mouseup 监听，切换 tab 时替换） */
   let planEndDraw = null;
   /* 列表多选：按 tab 分开记（devices / rooms） */
@@ -2409,6 +2483,7 @@
       <div class="lh-ed-row-sub">
         kind: <b>${esc(d.kind || '—')}</b> · entity: <code>${esc(d.entity || '—')}</code>
         ${d.room ? ' · 房间: <b>' + esc(roomNameSafe(d.room)) + '</b>' : ''}
+        ${d.card ? ' · <b>自定义面板</b>' : ''}
       </div>
     </div>
     <div class="lh-ed-row-actions">${stBadge}
@@ -2607,7 +2682,8 @@
           </div>
         </div>
         <span class="hint">子设备绑定规则：灯只绑灯、窗帘只绑窗帘；热水器（climate 含热水器 / water_heater 域）可绑开关 / 传感器。绑定后子设备不在户型图上单独显示，只在主设备的控制面板里出现。</span>
-      </label>`;
+      </label>
+      ${cardSectionHtml('dCard', d.card, '留空 = 使用 QLovehome 原生控制面板；集成卡片需已在 HA 中加载')}`;
 
     // 实体选择器 + 自动落位（Houseplan 式：选实体 → 自动定类型/名字）
     const pickerOpts = {
@@ -2663,6 +2739,7 @@
       }
     };
     const entPicker = createEntityPicker($('#dEntity', form), pickerOpts);
+    bindCardEditor(form, 'dCard', d.device_id || '');
 
     // 类型九宫格点选
     $('#dKindRow', form).addEventListener('click', (e) => {
@@ -2744,6 +2821,14 @@
       }
       if (!d.entity && !confirm('这台设备没有绑定 HA 实体，页面上不会显示实时状态，只能当装饰图标。\n仍要保存吗？')) return;
 
+      const ytxt = ($('#dCardYaml', form).value || '').trim();
+      if (ytxt) {
+        try { d.card = parseCardYaml(ytxt); }
+        catch (e) { toastHint('自定义面板 YAML 解析失败：' + e.message, 2800); return; }
+      } else {
+        delete d.card;
+      }
+
       if (isNew) window.LH.devices.push(d);
       markDirty();
       devDialog.classList.remove('open');
@@ -2794,6 +2879,7 @@
       <div class="lh-ed-row-sub">
         传感器：<code>${esc(r.temp || '—')}</code> / <code>${esc(r.hum || '—')}</code>
         · 设备数: <b>${devCount}</b>
+        ${r.card ? ' · <b>自定义面板</b>' : ''}
         ${r.mirror ? ' · 镜像自: <b>' + esc(r.mirror) + '</b>' : ''}
       </div>
     </div>
@@ -2830,10 +2916,12 @@
         <label>标签 X (lx)<input id="rLx" type="number" step="0.1" value="${r.lx ?? ''}"></label>
         <label>标签 Y (ly)<input id="rLy" type="number" step="0.1" value="${r.ly ?? ''}"></label>
       </div>
-      <label class="hint">房间多边形坐标请在「户型图」tab 中直接编辑顶点。</label>`;
+      <label class="hint">房间多边形坐标请在「户型图」tab 中直接编辑顶点。</label>
+      ${cardSectionHtml('rCard', r.card, '留空 = 不显示房间自定义面板入口')}`;
 
     createEntityPicker($('#rTemp', form), { domains: ['sensor', 'climate'], placeholder: '温度传感器' });
     createEntityPicker($('#rHum', form), { domains: ['sensor', 'climate'], placeholder: '湿度传感器' });
+    bindCardEditor(form, 'rCard', '');
 
     devDialog.classList.add('open');
     $('#lhEdDevSave', devDialog).onclick = () => {
@@ -2849,6 +2937,14 @@
       const states = haStates();
       const bad = [r.temp, r.hum].filter((e) => e && states && !states[e]);
       if (bad.length && !confirm('这些实体在 HA 中不存在：\n' + bad.join('\n') + '\n\n仍要保存吗？')) return;
+
+      const ytxt = ($('#rCardYaml', form).value || '').trim();
+      if (ytxt) {
+        try { r.card = parseCardYaml(ytxt); }
+        catch (e) { toastHint('自定义面板 YAML 解析失败：' + e.message, 2800); return; }
+      } else {
+        delete r.card;
+      }
 
       markDirty();
       devDialog.classList.remove('open');

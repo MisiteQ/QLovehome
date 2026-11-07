@@ -2285,6 +2285,14 @@
     const r = LH.rooms.find((x) => x.id === id);
     if (!r) return;
     state.room = id;
+    /* 房间级自定义面板：房间配了 card 才显示入口 */
+    const rpCard = $('#rpCard');
+    if (rpCard) {
+      rpCard.hidden = !r.card;
+      rpCard.onclick = r.card
+        ? () => openCardOverlay(r.name, '房间自定义面板', r.card)
+        : null;
+    }
     const p = $('#roomPanel');
     p.hidden = false;
     /* 房间面板与右列常驻栏互斥：开房间面板就把它收掉，列宽不变 */
@@ -2348,7 +2356,7 @@
     const subWorth = sub && sub !== '开启' && sub !== '关闭';
     item.innerHTML =
       `<span class="ri"><svg><use href="#${ICON[d.kind] || 'i-wave'}"/></svg></span>` +
-      `<span class="rn">${esc(d.name)}${(act || comp) && subWorth ? `<i>${esc(sub)}</i>` : ''}</span>`;
+      `<span class="rn">${esc(d.name)}${d.card ? '<em class="rcc">自定义</em>' : ''}${(act || comp) && subWorth ? `<i>${esc(sub)}</i>` : ''}</span>`;
     if (comp) {
       /* 复合设备：右侧给一个明晃晃的入口按钮，点条目任意位置也都进同一个弹窗 */
       const go = el('button', 'rgo');
@@ -3267,7 +3275,162 @@
     return ctl;
   }
 
-  function openControl(d) {
+  /* ── 自定义面板：把集成自带的 Lovelace 卡片 / 加载项页面接到设备或房间上 ──
+     卡片必须渲染在 HA 父窗口：iframe 有独立的 customElements 注册表，
+     ha-icon / ha-card 不会升级，hass-more-info 事件也冒泡不到 home-assistant。 */
+  function hassCardHost() {
+    try {
+      if (window.parent === window) return null;
+      const doc = window.parent.document;
+      if (!doc || !doc.body) return null;
+      return { win: window.parent, doc: doc };
+    } catch (e) { return null; }
+  }
+
+  /* qfnplus 的 popup-card 只是一个「磁贴」，点它还会再弹一层自己的面板。
+     直接换成它内部真正渲染的设备面板卡片，避免出现二级界面。 */
+  function normalizeCardConfig(card) {
+    if (!card || typeof card !== 'object') return card;
+    if (String(card.type || '') !== 'custom:qfnplus-popup-card') return card;
+    const out = {
+      type: 'custom:qfnplus-device-card',
+      title: card.panel_title || card.title,
+      device_id: card.device_id,
+      entry_id: card.entry_id,
+      show_diagnostics: card.show_diagnostics
+    };
+    Object.keys(out).forEach((k) => { if (out[k] === undefined) delete out[k]; });
+    return out;
+  }
+
+  function makeHassCard(card) {
+    const host = hassCardHost();
+    if (!host) return Promise.reject(new Error('不在 Home Assistant 页面中'));
+    const win = host.win;
+    const fallback = () => {
+      const type = String((card && card.type) || '');
+      const name = type.indexOf('custom:') === 0 ? type.slice(7) : type;
+      const C = name ? win.customElements.get(name) : null;
+      if (!C) throw new Error('卡片「' + type + '」未加载');
+      const el2 = new C();
+      if (typeof el2.setConfig === 'function') el2.setConfig(card);
+      return el2;
+    };
+    if (typeof win.loadCardHelpers !== 'function') {
+      try { return Promise.resolve(fallback()); } catch (e) { return Promise.reject(e); }
+    }
+    return Promise.resolve(win.loadCardHelpers())
+      .then((helpers) => helpers.createCardElement(card))
+      .then((el3) => el3 || fallback())
+      .catch(() => fallback());
+  }
+
+  function openCardOverlay(title, sub, card, onNative) {
+    card = normalizeCardConfig(card);
+    const host = hassCardHost();
+    const h = hass();
+    if (!host || !h) { toast('自定义面板需在 Home Assistant 中打开'); return; }
+    const doc = host.doc;
+
+    const prev = doc.getElementById('qlh-card-overlay');
+    if (prev) prev.remove();
+
+    const overlay = doc.createElement('div');
+    overlay.id = 'qlh-card-overlay';
+    overlay.style.cssText =
+      'position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;' +
+      'padding:16px;background:rgba(0,0,0,.45);';
+
+    const panel = doc.createElement('div');
+    panel.style.cssText =
+      'position:relative;display:flex;flex-direction:column;overflow:hidden;' +
+      'width:min(940px,calc(100vw - 32px));height:min(88vh,1100px);border-radius:18px;' +
+      'background:var(--ha-card-background,var(--card-background-color,#fff));' +
+      'color:var(--primary-text-color,#212121);' +
+      'box-shadow:0 24px 70px rgba(0,0,0,.45);';
+
+    const head = doc.createElement('div');
+    head.style.cssText =
+      'display:flex;align-items:center;gap:10px;padding:14px 18px;flex:none;' +
+      'border-bottom:1px solid var(--divider-color,rgba(0,0,0,.12));';
+
+    const titleBox = doc.createElement('div');
+    titleBox.style.cssText = 'flex:1;min-width:0;';
+    const tb = doc.createElement('b');
+    tb.textContent = title || '自定义面板';
+    tb.style.cssText = 'display:block;font-size:15px;font-weight:500;';
+    const sb = doc.createElement('span');
+    sb.textContent = sub || '';
+    sb.style.cssText = 'display:block;margin-top:3px;font-size:12px;' +
+      'color:var(--secondary-text-color,#727272);';
+    titleBox.append(tb, sb);
+
+    const btnStyle =
+      'border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12.5px;' +
+      'font-family:inherit;background:var(--secondary-background-color,rgba(0,0,0,.06));' +
+      'color:var(--primary-text-color,#212121);';
+    const nativeBtn = doc.createElement('button');
+    nativeBtn.type = 'button';
+    nativeBtn.textContent = '原生控制';
+    nativeBtn.style.cssText = btnStyle + (onNative ? '' : 'display:none;');
+    const closeBtn = doc.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.title = '关闭';
+    closeBtn.setAttribute('aria-label', '关闭');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = btnStyle + 'font-size:18px;line-height:1;padding:4px 10px;';
+
+    head.append(titleBox, nativeBtn, closeBtn);
+
+    const body = doc.createElement('div');
+    body.style.cssText = 'flex:1;min-height:0;overflow:auto;padding:14px 16px 18px;';
+
+    panel.append(head, body);
+    overlay.append(panel);
+    doc.body.append(overlay);
+
+    let timer = null;
+    let closed = false;
+    function close() {
+      if (closed) return;
+      closed = true;
+      if (timer) { clearInterval(timer); timer = null; }
+      doc.removeEventListener('keydown', onKey);
+      overlay.remove();
+    }
+    function onKey(ev) { if (ev.key === 'Escape') close(); }
+    doc.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) close(); });
+    closeBtn.addEventListener('click', close);
+    if (onNative) nativeBtn.addEventListener('click', () => { close(); onNative(); });
+
+    makeHassCard(card).then((el3) => {
+      if (closed) return;
+      el3.hass = h;
+      body.append(el3);
+      /* hass 对象每次状态变化都会换新，持续赋值让卡片跟着实时刷新 */
+      timer = setInterval(() => {
+        if (closed) return;
+        const nh = hass();
+        if (nh) el3.hass = nh;
+      }, 1000);
+    }).catch((err) => {
+      const msg = doc.createElement('div');
+      msg.style.cssText =
+        'padding:24px 8px;line-height:1.9;font-size:13px;color:var(--error-color,#d9534f);';
+      msg.textContent = '自定义卡片「' + ((card && card.type) || '?') + '」未加载：' +
+        ((err && err.message) || err) +
+        '。请确认对应集成已启用，或在 HA 仪表盘资源中添加该卡片 JS。';
+      body.append(msg);
+    });
+  }
+
+  function openControl(d, forceNative) {
+    if (!forceNative && d && d.card) {
+      openCardOverlay(d.name, roomName(d.room) + ' · 自定义面板', d.card,
+        () => openControl(d, true));
+      return;
+    }
     const dom = d.entity.split('.')[0];
     if (d.kind === 'cam' || dom === 'camera') { openCamera(d.entity, d.name); return; }
 
