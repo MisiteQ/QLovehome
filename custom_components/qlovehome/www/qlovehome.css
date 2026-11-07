@@ -1619,6 +1619,10 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .ctl-row.sub { margin-bottom: 10px; }
 .ctl-row.sub button { min-width: 50px; padding: 7px 8px; font-size: calc(11.5px * var(--fsk)); border-radius: 9px; }
 .ctl-row.sub + .ctl-row.sub { margin-top: -4px; }
+/* 附属功能分组标题（更多功能 / 实时数据）：和主控件拉开层次 */
+.ctl-h { margin: 14px 0 6px; font-size: calc(10.5px * var(--fsk)); letter-spacing: .6px; color: var(--dim-2); }
+/* select 型附属功能：左边一行标签，右边一排档位 */
+.ctl-row .rl { flex: 0 0 auto; align-self: center; padding-right: 2px; font-size: calc(11.5px * var(--fsk)); color: var(--dim-2); white-space: nowrap; }
 .ctl-slide { display: flex; align-items: center; gap: 12px; padding: 10px 2px 12px; font-size: calc(12.5px * var(--fsk)); color: var(--dim); }
 /* 标签可能 2~4 个汉字（开度 / 升降位置 / 目标湿度），别让它折行 */
 .ctl-slide > span { width: auto; min-width: 32px; flex: none; white-space: nowrap; }

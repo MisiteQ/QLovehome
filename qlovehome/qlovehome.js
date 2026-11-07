@@ -771,6 +771,9 @@
     Locked: '已上锁', Unlocked: '已开锁', Jammed: '卡住',
     Idle: '待机', Ringing: '响铃中', Charging: '充电中',
     heating: '加热中', cooling: '制冷中', drying: '除湿中', fan: '送风中',
+    /* climate / water_heater 直接上报的原始状态（之前会原样显示 heat / dry / fan_only） */
+    heat: '加热中', cool: '制冷中', dry: '除湿中', fan_only: '送风中', auto: '自动',
+    locked: '已上锁', unlocked: '已开锁', jammed: '卡住',
     sunny: '晴', clear: '晴', 'clear-night': '晴夜', cloudy: '多云', partlycloudy: '局部多云',
     rainy: '有雨', pouring: '大雨', snowy: '有雪', 'snowy-rainy': '雨夹雪',
     fog: '雾', hail: '冰雹', lightning: '雷雨', 'lightning-rainy': '雷阵雨',
@@ -778,7 +781,7 @@
   };
   const HVAC = { off: '已关闭', heat: '制热', cool: '制冷', dry: '除湿', fan_only: '送风', auto: '自动', unavailable: '离线', idle: '待机' };
   const SWING = { off: '关闭', both: '同时', horizontal: '左右', vertical: '上下' };
-  const PRESET = { none: '无', comfort: '舒适', eco: '节能', boost: '强劲', sleep: '睡眠', away: '离家', home: '在家', activity: '活动', posterior_wash: '臀洗', feminine_wash: '妇洗', air_dry: '烘干', stop: '停止', washing: '冲洗', drying: '烘干' };
+  const PRESET = { none: '无', comfort: '舒适', eco: '节能', boost: '强劲', sleep: '睡眠', away: '离家', home: '在家', activity: '活动', posterior_wash: '臀洗', feminine_wash: '妇洗', air_dry: '烘干', stop: '停止', washing: '冲洗', drying: '烘干', prevent_super_cool: '防过冷', 'prevent super cool': '防过冷' };
   /* 通用翻译：任何 domain 的 select 选项查不到专用表时，退回这里 */
   const ALIAS_MAP = {
     posterior: '臀洗', posterior_wash: '臀洗', 'posterior wash': '臀洗',
@@ -3840,6 +3843,19 @@
     $$('[data-fan]', box).forEach((b) => b.classList.toggle('on', a.fan_mode === b.dataset.fan));
     $$('[data-preset]', box).forEach((b) => b.classList.toggle('on', a.preset_mode === b.dataset.preset));
     $$('[data-src]', box).forEach((b) => b.classList.toggle('on', a.source === b.dataset.src));
+    /* 同设备附属功能：switch / fan 看开关态，select 看当前选项 */
+    $$('[data-fn]', box).forEach((b) => b.classList.toggle('on', isOnEntity(b.dataset.fn)));
+    $$('[data-selopt]', box).forEach((b) => {
+      const s2 = st(b.dataset.selopt);
+      b.classList.toggle('on', !!s2 && s2.state === b.dataset.val);
+    });
+    $$('[data-live]', box).forEach((n) => {
+      const s2 = st(n.dataset.live);
+      if (!s2) return;
+      const unit = n.dataset.unit || ((s2.attributes || {}).unit_of_measurement || '');
+      const v = /^-?\d+(\.\d+)?$/.test(String(s2.state)) ? fmtNum(Number(s2.state)) : stateLabel(s2);
+      n.textContent = v + unit;
+    });
     const pw = $('#ctlPower', box);
     if (pw) {
       const on = isOn(d);
@@ -4130,17 +4146,143 @@
     return box;
   }
 
+  /* ── 同设备的附属功能 ────────────────────────────────────────────
+     美的（midea_smart_home）这类集成把电辅热 / 无风感 / 环绕风 / 自清洁 /
+     零冷水拆成同一台设备下的 switch、select，主实体 climate / water_heater
+     只负责温度。只看主实体属性，面板就永远缺功能，所以这里再扫一遍同设备实体。 */
+  const SIB_SKIP_RE = /indicator|指示灯|backlight|童锁|child_?lock|提示音|按键音|buzzer|beep|_power$/i;
+  /* 部分能力（water_heater 的 operation_list、climate 的 min/max_temp）只出现在
+     实体注册表里，不在运行时 state 属性中。hass.entities 有就直接取，没有就退回空表。 */
+  function capOf(e) {
+    try {
+      const reg = ((hass() || {}).entities || {})[e];
+      return (reg && reg.capabilities) || {};
+    } catch (err) { return {}; }
+  }
+  /* 美的把出风方向、无风感这类档位放在 select 的 options 里，值是英文枚举 */
+  const OPT_LABEL = {
+    wind_swing_ud_angle: { off: '关闭', top: '顶部', upper: '上部', middle: '中部', lower: '下部', bottom: '底部' },
+    wind_swing_lr_angle: { off: '关闭', leftmost: '最左', left: '左', middle: '中间', right: '右', rightmost: '最右' },
+    no_wind_sense: { off: '关闭', up_down_no_wind: '上下无风', up_no_wind: '上部无风', down_no_wind: '下部无风' },
+    wind_around: { off: '关闭', up: '上', down: '下' },
+    prevent_straight_wind: { off: '关闭', up: '上', down: '下' },
+    ptc: { off: '关闭', mode_1: '一档', mode_2: '二档' },
+    cold_water_conservation: { off: '关闭', on: '开启' }
+  };
+  /* 美的的风速是百分比字符串（20 / 40 / … / 100 / 102），不是 low / medium / high */
+  const fanText = (m) => (/^\d+$/.test(String(m)) ? m + '%' : tr(FAN, m));
+  function optLabel(e, o) {
+    const key = String(e || '').split('.')[1] || '';
+    for (const k of Object.keys(OPT_LABEL)) {
+      if (key.slice(-k.length) === k) {
+        const m = OPT_LABEL[k];
+        return m[o] || m[String(o).toLowerCase()] || tr(ALIAS_MAP, o);
+      }
+    }
+    return tr(ALIAS_MAP, o);
+  }
+  /* 实体名去掉设备名前缀：「次卧空调 电辅热」→「电辅热」 */
+  function sibName(d, s) {
+    const fn = String(((s || {}).attributes || {}).friendly_name || '').trim();
+    if (!fn) return '';
+    if (d.name && fn.indexOf(d.name) === 0) {
+      const rest = fn.slice(String(d.name).length).replace(/^[\s·-]+/, '');
+      if (rest) return rest;
+    }
+    const parts = fn.split(/\s+/);
+    return parts.length > 1 ? parts.slice(1).join(' ') : fn;
+  }
+  /* 同名功能（防直吹 / 电辅热常同时有 select 和 switch）只留一个：
+     select 的档位更全，优先保留 select */
+  function sibList(d, doms) {
+    const out = [];
+    const seen = {};
+    (d.entities || []).forEach((e) => {
+      const dom = String(e || '').split('.')[0];
+      if (!e || e === d.entity || doms.indexOf(dom) < 0) return;
+      if (SIB_SKIP_RE.test(e)) return;
+      const s = st(e);
+      if (!s || s.state === 'unavailable') return;
+      const name = sibName(d, s) || e.split('.')[1].replace(/_/g, ' ');
+      const prev = seen[name];
+      if (prev) {
+        if (prev.dom === 'select' || dom !== 'select') return;
+        const i = out.indexOf(prev);
+        if (i >= 0) out.splice(i, 1);
+      }
+      const it = { e, dom, name };
+      seen[name] = it;
+      out.push(it);
+    });
+    return out;
+  }
+  function sibHtml(d, doms, title) {
+    const list = sibList(d, doms);
+    const parts = [];
+    const pills = list.filter((x) => x.dom !== 'select');
+    if (pills.length) {
+      parts.push('<div class="ctl-row sub">' + pills.map((x) =>
+        `<button data-fn="${x.e}" type="button">${esc(x.name)}</button>`).join('') + '</div>');
+    }
+    list.filter((x) => x.dom === 'select').forEach((x) => {
+      const sx = st(x.e) || { attributes: {} };
+      const opts = ((sx.attributes || {}).options || []).slice(0, 8);
+      if (!opts.length) return;
+      parts.push('<div class="ctl-row sub"><span class="rl">' + esc(x.name) + '</span>' +
+        opts.map((o) => `<button data-selopt="${x.e}" data-val="${esc(o)}" type="button">${esc(optLabel(x.e, o))}</button>`).join('') +
+        '</div>');
+    });
+    if (!parts.length) return '';
+    return '<div class="ctl-h">' + title + '</div>' + parts.join('');
+  }
+  /* 附属只读读数（温度 / 湿度 / 功率 / 水量…）：跳过目标值、IP 这类没意义的行 */
+  const READ_SKIP_RE = /目标|局域网|lan_ip|_ip$|实时电流|实时电压|压缩机实时功率/i;
+  function readoutHtml(d, doms, title) {
+    const rows = [];
+    (d.entities || []).forEach((e) => {
+      if (rows.length >= 10) return;
+      if (!e || e === d.entity || doms.indexOf(String(e).split('.')[0]) < 0) return;
+      if (SIB_SKIP_RE.test(e) || READ_SKIP_RE.test(e)) return;
+      const s = st(e);
+      if (!s || s.state === 'unavailable' || s.state === 'unknown') return;
+      const a = s.attributes || {};
+      const name = sibName(d, s);
+      if (!name) return;
+      const unit = a.unit_of_measurement || '';
+      const v = /^-?\d+(\.\d+)?$/.test(String(s.state)) ? fmtNum(Number(s.state)) : stateLabel(s);
+      rows.push(`<div class="crow ro"><span class="clab">${esc(name)}</span>` +
+        `<b class="cval" data-live="${e}" data-unit="${esc(unit)}">${esc(v)}${esc(unit)}</b></div>`);
+    });
+    if (!rows.length) return '';
+    return '<div class="ctl-h">' + title + '</div>' + rows.join('');
+  }
+  /* 附属功能的点击：switch/fan 走 toggle，select 走 select_option */
+  function wireSib(box) {
+    $$('[data-fn]', box).forEach((b) => b.addEventListener('click', () => {
+      const e = b.dataset.fn;
+      const on = !isOnEntity(e);
+      sendControl(e.split('.')[0], 'toggle', { entity_id: e }, b.textContent.trim());
+      b.classList.toggle('on', on);
+    }));
+    $$('[data-selopt]', box).forEach((b) => b.addEventListener('click', () => {
+      const e = b.dataset.selopt;
+      sendControl('select', 'select_option', { entity_id: e, option: b.dataset.val }, b.textContent.trim());
+      $$('[data-selopt="' + e + '"]', box).forEach((x) => x.classList.toggle('on', x === b));
+    }));
+  }
+
   function climateCtl(d) {
     const a = (st(d.entity) || { attributes: {} }).attributes || {};
-    const step = a.target_temp_step || 0.5;
-    const lo = a.min_temp != null ? a.min_temp : 16;
-    const hi = a.max_temp != null ? a.max_temp : 30;
+    const cap = capOf(d.entity);
+    const step = a.target_temp_step || cap.target_temp_step || 0.5;
+    const lo = a.min_temp != null ? a.min_temp : (cap.min_temp != null ? cap.min_temp : 16);
+    const hi = a.max_temp != null ? a.max_temp : (cap.max_temp != null ? cap.max_temp : 30);
     /* 浴霸这类没有温度能力的，不给温度区，免得下发 set_temperature 失败 */
-    const canTemp = a.temperature != null || a.target_temp_step != null;
-    const modes = a.hvac_modes || [];
-    const fans = a.fan_modes || [];
-    const presets = a.preset_modes || [];
-    const swings = a.swing_modes || [];
+    const canTemp = a.temperature != null || a.target_temp_step != null || cap.target_temp_step != null;
+    const modes = a.hvac_modes || cap.hvac_modes || [];
+    const fans = a.fan_modes || cap.fan_modes || [];
+    const presets = a.preset_modes || cap.preset_modes || [];
+    const swings = a.swing_modes || cap.swing_modes || [];
     const box = el('div', 'ctl');
     box.innerHTML =
       ctlHead(d) +
@@ -4155,12 +4297,14 @@
       (modes.length
         ? `<div class="ctl-row">${modes.map((m) => `<button data-mode="${m}" type="button">${tr(HVAC, m)}</button>`).join('')}</div>` : '') +
       (fans.length
-        ? `<div class="ctl-row sub">${fans.map((m) => `<button data-fan="${m}" type="button">${tr(FAN, m)}</button>`).join('')}</div>` : '') +
+        ? `<div class="ctl-row sub">${fans.map((m) => `<button data-fan="${m}" type="button">${fanText(m)}</button>`).join('')}</div>` : '') +
       (presets.length
         ? `<div class="ctl-row sub">${presets.map((m) => `<button data-preset="${m}" type="button">${tr(PRESET, m)}</button>`).join('')}</div>` : '') +
       (swings.length
         ? `<div class="ctl-row sub">${swings.map((m) => `<button data-swing="${m}" type="button">${tr(SWING, m)}</button>`).join('')}</div>` : '') +
+      sibHtml(d, ['select', 'switch', 'fan'], '更多功能') +
       '<div class="ctl-foot"><button class="wide" id="ctlPower" type="button">开机 / 关机</button></div>' +
+      readoutHtml(d, ['sensor'], '实时数据') +
       (canTemp ? `<div class="ctl-note">温度范围 ${lo}–${hi}°，模式 / 风速 / 预设 / 扫风都取实体自己上报的清单，页面不硬凑选项。</div>` : '');
     box.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => {
       const a2 = (st(d.entity) || { attributes: {} }).attributes || {};
@@ -4175,7 +4319,7 @@
       $$('[data-mode]', box).forEach((x) => x.classList.toggle('on', x === b));
     }));
     $$('[data-fan]', box).forEach((b) => b.addEventListener('click', () => {
-      sendControl('climate', 'set_fan_mode', { entity_id: d.entity, fan_mode: b.dataset.fan }, '风速 ' + tr(FAN, b.dataset.fan));
+      sendControl('climate', 'set_fan_mode', { entity_id: d.entity, fan_mode: b.dataset.fan }, '风速 ' + fanText(b.dataset.fan));
       $$('[data-fan]', box).forEach((x) => x.classList.toggle('on', x === b));
     }));
     $$('[data-preset]', box).forEach((b) => b.addEventListener('click', () => {
@@ -4186,6 +4330,7 @@
       sendControl('climate', 'set_swing_mode', { entity_id: d.entity, swing_mode: b.dataset.swing }, '扫风 ' + tr(SWING, b.dataset.swing));
       $$('[data-swing]', box).forEach((x) => x.classList.toggle('on', x === b));
     }));
+    wireSib(box);
     wireCtl(box, d);
     return box;
   }
@@ -4298,31 +4443,52 @@
     wireCtl(box, d);
     return box;
   }
+  /* water_heater 的工作模式（美的只给 off / heat），别把英文直接摆到按钮上 */
+  const WATER_OP = {
+    off: '关闭', heat: '加热', eco: '节能', performance: '强力', high_demand: '高需求',
+    heat_pump: '热泵', gas: '燃气', electric: '电加热', auto: '自动'
+  };
   function heaterCtl(d) {
     const a = (st(d.entity) || { attributes: {} }).attributes || {};
+    const cap = capOf(d.entity);
+    /* 美的热水器只给 target_temp_low / target_temp_high，min/max 在注册表能力里 */
+    const lo = a.min_temp != null ? a.min_temp
+      : (cap.min_temp != null ? cap.min_temp : (a.target_temp_low != null ? a.target_temp_low : 30));
+    const hi = a.max_temp != null ? a.max_temp
+      : (cap.max_temp != null ? cap.max_temp : (a.target_temp_high != null ? a.target_temp_high : 75));
+    const ops = a.operation_list || cap.operation_list || [];
     const box = el('div', 'ctl');
     box.innerHTML =
       ctlHead(d) +
+      (a.current_temperature != null
+        ? '<div class="crow ro"><span class="clab">当前水温</span>' +
+          `<b class="cval" data-attr="current_temperature" data-unit="°">${a.current_temperature}</b></div>` : '') +
       '<div class="ctl-temp">' +
       '<button class="round" data-t="-1" type="button" aria-label="降温">−</button>' +
       `<div class="tt"><b data-attr="temperature" data-unit="°">${a.temperature == null ? '—' : a.temperature}</b>` +
       '<span>目标温度 · 1° 一档</span></div>' +
       '<button class="round" data-t="1" type="button" aria-label="升温">＋</button>' +
       '</div>' +
-      ((a.operation_list || []).length
-        ? `<div class="ctl-row">${a.operation_list.map((m) => `<button data-op="${esc(m)}" type="button">${esc(m)}</button>`).join('')}</div>` : '') +
-      '<div class="ctl-foot"><button class="wide" id="ctlPower" type="button">开机 / 关机</button></div>';
+      (ops.length
+        ? `<div class="ctl-row">${ops.map((m) => `<button data-op="${esc(m)}" type="button">${esc(tr(WATER_OP, m))}</button>`).join('')}</div>` : '') +
+      sibHtml(d, ['select', 'switch'], '更多功能') +
+      '<div class="ctl-foot"><button class="wide" id="ctlPower" type="button">开机 / 关机</button></div>' +
+      readoutHtml(d, ['sensor'], '实时数据') +
+      `<div class="ctl-note">温度范围 ${lo}–${hi}°，模式与档位都取实体自己上报的清单。</div>`;
     box.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => {
       const a2 = (st(d.entity) || { attributes: {} }).attributes || {};
-      const lo = a2.min_temp != null ? a2.min_temp : 30;
-      const hi = a2.max_temp != null ? a2.max_temp : 75;
+      const lo2 = a2.min_temp != null ? a2.min_temp : (a2.target_temp_low != null ? a2.target_temp_low : lo);
+      const hi2 = a2.max_temp != null ? a2.max_temp : (a2.target_temp_high != null ? a2.target_temp_high : hi);
       let t = a2.temperature != null ? a2.temperature : 45;
-      t = Math.min(hi, Math.max(lo, t + Number(b.dataset.t)));
+      t = Math.min(hi2, Math.max(lo2, t + Number(b.dataset.t)));
       sendControl('water_heater', 'set_temperature', { entity_id: d.entity, temperature: t }, '设定 ' + t + '°');
     }));
     $$('[data-op]', box).forEach((b) => b.addEventListener('click', () => {
-      sendControl('water_heater', 'set_operation_mode', { entity_id: d.entity, operation_mode: b.dataset.op }, '模式 ' + b.dataset.op);
+      sendControl('water_heater', 'set_operation_mode', { entity_id: d.entity, operation_mode: b.dataset.op },
+        '模式 ' + tr(WATER_OP, b.dataset.op));
+      $$('[data-op]', box).forEach((x) => x.classList.toggle('on', x === b));
     }));
+    wireSib(box);
     wireCtl(box, d);
     return box;
   }
@@ -4368,6 +4534,27 @@
   const fmtNum = (v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 100) / 100 : v);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const infoRow = (k, v) => `<div class="ci-r"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
+  /* 属性名 / 枚举值都汉化，别在「实体信息」里摆一手英文 */
+  const ATTR_LABEL = {
+    current_temperature: '当前温度', temperature: '目标温度',
+    target_temp_low: '目标温度下限', target_temp_high: '目标温度上限',
+    current_humidity: '当前湿度', humidity: '目标湿度', temperature_unit: '温度单位',
+    fan_mode: '风速', preset_mode: '预设', swing_mode: '扫风', swing_horizontal_mode: '左右扫风',
+    hvac_action: '运行动作', operation_mode: '工作模式',
+    current_power_w: '当前功率', power: '功率', energy: '能耗',
+    battery_level: '电量', battery: '电池'
+  };
+  const HVAC_ACTION = { off: '停止', heating: '制热中', cooling: '制冷中', drying: '除湿中',
+    fan: '送风中', idle: '待机', preheating: '预热中', defrosting: '化霜中' };
+  function attrVal(k, v) {
+    if (v == null) return v;
+    if (k === 'fan_mode') return fanText(v);
+    if (k === 'preset_mode') return tr(PRESET, v);
+    if (k === 'swing_mode' || k === 'swing_horizontal_mode') return tr(SWING, v);
+    if (k === 'hvac_action') return tr(HVAC_ACTION, v);
+    if (k === 'operation_mode') return tr(WATER_OP, v);
+    return v;
+  }
   function infoCard(d, open) {
     const box = el('div', 'ctl-info');
     box.innerHTML = '<button class="ci-h' + (open ? ' open' : '') + '" type="button" id="ciToggle">实体信息<i>▾</i></button>' +
@@ -4416,7 +4603,9 @@
     rows.push(infoRow('实体 ID', d.entity));
     rows.push(infoRow('域 / 类型', d.entity.split('.')[0] + ' · ' + d.kind));
     rows.push(infoRow('房间', roomName(d.room)));
-    rows.push(infoRow('当前状态', s.state));
+    const dom = d.entity.split('.')[0];
+    rows.push(infoRow('当前状态', dom === 'climate' ? tr(HVAC, s.state)
+      : dom === 'water_heater' ? tr(WATER_OP, s.state) : stateLabel(s)));
     if (s.last_changed) rows.push(infoRow('最后变化', ago(s.last_changed)));
     Object.keys(a).sort().forEach((k) => {
       if (SKIP_ATTR[k]) return;
@@ -4427,7 +4616,7 @@
         v = v.join('、');
       }
       if (String(v).length > 40) return;
-      rows.push(infoRow(k, fmtNum(v)));
+      rows.push(infoRow(ATTR_LABEL[k] || k, fmtNum(attrVal(k, v))));
     });
     const rel = state.rel || [];
     if (rel.length) rows.push(infoRow('同设备读数', rel.map((x) => x.n + ' ' + x.v).join(' · ')));
