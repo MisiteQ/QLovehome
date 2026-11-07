@@ -70,6 +70,6 @@
 - [x] 前端 `?v=160` 已同步三份并上传 HAOS，SHA256 与本地一致。
 
 ## T9 发布
-- [ ] 提交并推送 `main`
-- [ ] CI `Validate` 通过
-- [ ] 更新 GitHub Release `v1.5.0` 两个 zip 附件
+- [x] 提交并推送 `main`
+- [x] CI `Validate` 通过（run 42362755054）
+- [x] 更新 GitHub Release `v1.5.0` 两个 zip 附件
