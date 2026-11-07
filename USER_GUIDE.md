@@ -1,6 +1,6 @@
 ﻿# QLoveHome · 使用帮助（详细版）
 
-> **适用版本**：v1.4.8  
+> **适用版本**：v1.6.0  
 > **适用人群**：Home Assistant 2025.1+ / HAOS 用户（已在 Core 2026.11 上验证）  
 > **前置条件**：已安装 Home Assistant，有一台平板（门口 / 客厅常亮）
 
@@ -10,7 +10,7 @@
 
 1. [这套面板能做什么？](#1-这套面板能做什么)
 2. [快速安装（10 分钟）](#2-快速安装10-分钟)
-   - 方式 A：HAOS Add-on（推荐）
+   - 方式 A：HAOS 应用（原 Add-on，推荐）
    - 方式 B：HACS Integration
    - 方式 C：纯 iframe（最简，但功能受限）
 3. [接线：把你的设备接进来](#3-接线把你的设备接进来)
@@ -34,6 +34,8 @@
 | **户型图** | 矢量渲染的房间布局，墙体自动融合；点房间看温湿度和中控 |
 | **右栏** | 常用设备快捷开关 + 安防网关在线状态 |
 | **概览面板** | 家人在线 · 用电 · 安防 · 各屋温湿度 · 电池电量 · 摄像头 · 网络 · 系统 |
+| **环境曲线** | 点概览里的各屋温湿度 → 看这间房 24 小时的温度 / 湿度走势 |
+| **家里最近发生** | 读取 HA 事件时间线（门锁、传感器、自动化等），一屏看到家里刚发生的事 |
 | **家电页** | 按类型聚合，灯、插座、空调（含扫风）、风扇、窗帘统一开关调光 |
 | **最近动态** | 自动记录设备操控 / 定时设置 / 定时到点执行，JSONL 存服务器 |
 | **屏保** | 无操作自动进大屏时钟，触控 / 键盘 / 滚轮任意操作唤醒 |
@@ -44,17 +46,17 @@
 
 ## 2. 快速安装（10 分钟）
 
-### 方式 A：HAOS Add-on（推荐）
+### 方式 A：HAOS 应用（原 Add-on，推荐）
 
 如果你跑的是 HAOS（官方镜像、OVA、树莓派官方安装），Supervisor 一键装：
 
-1. **Home Assistant → 设置 → 加载项 → 右上角 ⋮ → 添加加载项仓库**
+1. **Home Assistant → 设置 → 应用 → 应用商店（App store，旧版叫「加载项」）→ 右上角 ⋮ → 添加应用仓库**
 2. URL：`https://github.com/MisiteQ/QLovehome`
 3. 点 **添加**（仓库根的 `repository.yaml` 自动识别）
 4. 列表里找到 **QLovehome** → 点 **安装**（首次构建约 3-5 分钟）
-5. 完成后侧边栏自动出现 **QLovehome** 🎉（没出现就从「加载项 → QLovehome → 打开 WEB UI」进）
+5. 完成后侧边栏自动出现 **QLovehome** 🎉（没出现就从「设置 → 应用 → QLovehome → 打开 WEB UI」进）
 
-> 💡 Add-on 后端是独立 Python 进程，通过 HA WebSocket API 连接本机 HA（令牌由 Supervisor 自动注入），配置和审计日志存在 `/data/` 目录。HA 重启后定时任务自动恢复。
+> 💡 应用（原 Add-on）后端是独立 Python 进程，通过 HA WebSocket API 连接本机 HA（令牌由 Supervisor 自动注入），配置和审计日志存在 `/data/` 目录。HA 重启后定时任务自动恢复。
 
 ### 方式 B：HACS Integration
 
@@ -251,9 +253,11 @@ python gen_qlovehome_data.py
 | **圆形房间** | 按住鼠标从圆心拖出半径 |
 | **多边形** | 逐点点击画异形 |
 | **双击房间** | 弹框改名 |
+| **右键设备 / 房间** | 直接打开对应的设备 / 房间编辑弹窗 |
+| **↑ ↓ ← →** | 移动选中项 1px；按住 **Shift** 一次移动 10px（房间会带着房内设备一起走） |
 | **Delete / Backspace** | 删除选中 |
 | **Ctrl/⌘ / Shift + 点击** | 多选 |
-| **右键** | 取消当前操作 |
+| **右键空白处** | 取消当前操作 |
 | **Esc** | 退出编辑器 |
 
 ### 房间名字拖拽
@@ -265,6 +269,8 @@ python gen_qlovehome_data.py
 ## 7. 最近动态（最近操作记录）
 
 底部 tab 栏新增 **「最近动态」** 按钮，点进去会看到自动记录的所有操作。
+
+> 「最近动态」记录的是**在面板上发生的操作**；概览卡片里的「**家里最近发生**」读的是 HA 事件时间线（门锁、传感器、自动化等），两者互补。
 
 ### 能看到什么
 
@@ -298,9 +304,9 @@ python gen_qlovehome_data.py
 
 | 现象 | 原因 | 解决 |
 |---|---|---|
-| **Supervisor 提示「无效的加载项仓库」** | 仓库根缺 `repository.yaml` | 用最新代码，`repository.yaml` 已在仓库根目录 |
-| **Add-on 构建失败 / 卡住** | 拉基础镜像或 Alpine 包慢、网络不通 | 给 HA 配 Docker 镜像加速；看「加载项 → 日志」的具体报错 |
-| **Add-on 启动后侧边栏没入口** | Ingress 面板未注册 / 缓存 | 重启加载项；清浏览器缓存；或从「加载项 → QLovehome → 打开 WEB UI」进入 |
+| **Supervisor 提示「无效的加载项仓库」** | 仓库根缺 `repository.yaml` | 用最新代码，`repository.yaml` 已在仓库根目录；新版可能显示「无效的应用仓库」 |
+| **应用构建失败 / 卡住** | 拉基础镜像或 Alpine 包慢、网络不通 | 给 HA 配 Docker 镜像加速；看「设置 → 应用 → 日志」的具体报错 |
+| **应用启动后侧边栏没入口** | Ingress 面板未注册 / 缓存 | 重启应用；清浏览器缓存；或从「设置 → 应用 → QLovehome → 打开 WEB UI」进入 |
 | 侧边栏没出现 QLovehome（集成模式） | panel 注册可能失败（非致命） | Dashboard 手动加 iframe 卡片 → `/qlh/www/index.html` |
 | 页面空白 | iframe 地址写错 / 文件没传 | 确认 Dashboard 卡片 URL；确认 `/config/www/qlovehome/` 下有 index.html |
 | 全是「—」 | 实体 ID 没换成你的 | 打开开发者工具 → 控制台输 `LH.rooms.map(r=>r.lxs)` 看实际读的是什么 |
@@ -331,12 +337,12 @@ localStorage        // 只看启动缓存（真实配置在服务器）
 ## 目录结构速查（用户版 zip）
 
 ```
-QLovehome-v1.4.5/                        # 注意：zip 内没有这一层，以下是解压后的完整包结构
-├── repository.yaml                       # ← Supervisor 加载项仓库标识（必须在根）
+QLovehome-v1.6.0/                        # 注意：zip 内没有这一层，以下是解压后的完整包结构
+├── repository.yaml                       # ← Supervisor 应用仓库标识（必须在根）
 ├── hacs.json                             # HACS 集成元信息
 │
-├── qlovehome_addon/                      # ⭐ HAOS 加载项（推荐）
-│   ├── config.yaml                       #   加载项元数据（slug / ingress / arch）
+├── qlovehome_addon/                      # ⭐ HAOS 应用（原加载项，推荐）
+│   ├── config.yaml                       #   应用元数据（slug / ingress / arch）
 │   ├── Dockerfile
 │   ├── run.sh
 │   ├── server/                           #   独立 Python 后端

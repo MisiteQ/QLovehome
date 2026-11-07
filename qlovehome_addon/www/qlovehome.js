@@ -2725,7 +2725,7 @@
     media_player: mediaCtl, humidifier: humidCtl, water_heater: heaterCtl,
     lock: lockCtl, vacuum: vacCtl
   };
-  function roomName(id) { const r = LH.rooms.find((x) => x.id === id); return r ? r.name : ''; }
+  function roomName(id) { if (id === 'solo') return '独立设备'; const r = LH.rooms.find((x) => x.id === id); return r ? r.name : ''; }
 
   /* ── 底部大按钮 power button 适用的 domain ── */
   const MAIN_SWITCHABLE = ['switch', 'light', 'cover', 'fan', 'media_player', 'water_heater', 'humidifier', 'lock', 'vacuum', 'valve', 'remote'];
@@ -4850,6 +4850,240 @@
     return h;
   }
 
+  /* ── 家里最近发生：米家消息 + 场景执行历史（最近 48 小时） ── */
+  let evCache = null, evAt = 0, evBusy = false;
+  function evCfg() { return ((LH.config.overview || {}).events) || {}; }
+
+  function evTime(ts) {
+    const d = new Date(ts);
+    if (!isFinite(d.getTime())) return '—';
+    const hm = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+    const n = new Date();
+    const day0 = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+    if (d.getTime() >= day0) return hm;
+    if (d.getTime() >= day0 - 864e5) return '昨天 ' + hm;
+    return (d.getMonth() + 1) + '-' + d.getDate() + ' ' + hm;
+  }
+
+  function evParse(p, kind) {
+    const raw = String(p.state == null ? '' : p.state).trim();
+    if (!raw || raw === 'unavailable' || raw === 'unknown' || raw === 'none') return null;
+    const ts = p.last_changed || p.last_updated;
+    if (!ts) return null;
+    let who = '', what = raw;
+    if (kind === 'msg') {
+      const i = raw.indexOf(': ');
+      if (i > 0) { who = raw.slice(0, i); what = raw.slice(i + 2); }
+      what = what.replace(/^\d{1,2}:\d{2}\s*/, '');
+    } else {
+      const i = raw.indexOf('-');
+      if (i > 0) { who = raw.slice(0, i); what = raw.slice(i + 1); }
+    }
+    return { t: ts, kind: kind, who: who.trim(), what: what.trim() };
+  }
+
+  function evIcon(e) {
+    const s = (e.who || '') + (e.what || '');
+    if (/门锁/.test(s)) return 'i-lock';
+    if (/门铃/.test(s)) return 'i-bell';
+    if (/摄像|画面/.test(s)) return 'i-cam';
+    if (/炸锅|烹饪|洗衣|烘干/.test(s)) return 'i-pot';
+    if (/离家|回家|全屋/.test(s)) return 'i-home';
+    return 'i-bolt';
+  }
+
+  async function loadEvents(force) {
+    const EV = evCfg();
+    const ids = [EV.message, EV.scene].filter(Boolean);
+    if (!ids.length) return [];
+    if (evCache && !force && Date.now() - evAt < 240000) return evCache;
+    if (evBusy) return evCache || [];
+    const h = hass();
+    if (!h || !h.callApi) return evCache || [];
+    evBusy = true;
+    try {
+      const t0 = new Date(Date.now() - 48 * 3600e3).toISOString();
+      const res = await h.callApi('GET', 'history/period/' + t0 +
+        '?filter_entity_id=' + ids.join(',') + '&minimal_response');
+      const out = [];
+      (res || []).forEach((grp) => {
+        if (!grp || !grp.length) return;
+        const eid = grp[0].entity_id || '';
+        const kind = (EV.scene && eid === EV.scene) ? 'scene' : 'msg';
+        grp.forEach((p) => { const x = evParse(p, kind); if (x) out.push(x); });
+      });
+      out.sort((a, b) => new Date(b.t) - new Date(a.t));
+      evCache = out;
+      evAt = Date.now();
+    } catch (err) {
+      evCache = evCache || [];
+    } finally {
+      evBusy = false;
+    }
+    return evCache;
+  }
+
+  function paintEventsCard(c) {
+    loadEvents().then((list) => {
+      const box = c.querySelector('.ev-list');
+      if (!box) return;
+      if (!list.length) {
+        box.innerHTML = '<div class="ev-empty">这两天米家没有新消息</div>';
+        return;
+      }
+      const n = list.filter((e) => {
+        const t = new Date(e.t).getTime();
+        const n0 = new Date();
+        return t >= new Date(n0.getFullYear(), n0.getMonth(), n0.getDate()).getTime();
+      }).length;
+      const b = c.querySelector('.badge');
+      if (b) b.textContent = n ? '今天 ' + n + ' 条' : '最近 ' + list.length + ' 条';
+      box.innerHTML = list.slice(0, 5).map((e) =>
+        '<div class="ev-i">' +
+          '<svg><use href="#' + evIcon(e) + '"/></svg>' +
+          '<span class="ev-t">' + evTime(e.t) + '</span>' +
+          '<b>' + esc((e.who ? e.who + ' · ' : '') + e.what) + '</b>' +
+        '</div>').join('');
+    });
+  }
+
+  function openEvents() {
+    clearInterval(state.pageTimer);
+    showLayer('家里最近发生', '门锁 · 门铃 · 摄像头 · 场景执行 · 最近 48 小时', true);
+    $('#layerBody').innerHTML = '<div class="cards layer-cards" id="evCards"></div>';
+    buildEvents();
+    state.pageTimer = setInterval(() => {
+      if (!state.layer || !$('#evCards')) return clearInterval(state.pageTimer);
+      buildEvents();
+    }, 60000);
+  }
+
+  function evCard(title, icon, list, note) {
+    const LIM = 80;
+    const shown = list.slice(0, LIM);
+    const rows = list.length
+      ? '<div class="ev-tl">' + shown.map((e) =>
+        '<div class="ev-l">' +
+          '<span class="ev-t">' + evTime(e.t) + '</span>' +
+          '<i><svg><use href="#' + evIcon(e) + '"/></svg></i>' +
+          '<span class="ev-w">' + esc(e.who || '—') + '</span>' +
+          '<b>' + esc(e.what) + '</b>' +
+        '</div>').join('') + '</div>'
+      : '<div class="ev-empty">这两天没有记录</div>';
+    return card(title, icon, list.length ? list.length + ' 条' : '', rows +
+      '<div class="card-sub">' + note +
+      (list.length > LIM ? ' · 篇幅所限只列最近 ' + LIM + ' 条' : '') + '</div>');
+  }
+
+  function buildEvents() {
+    const box = $('#evCards');
+    if (!box) return;
+    loadEvents().then((list) => {
+      if (!box.isConnected) return;
+      box.innerHTML = '';
+      const msg = list.filter((x) => x.kind === 'msg');
+      const scn = list.filter((x) => x.kind === 'scene');
+      box.append(evCard('米家消息', 'i-bell', msg,
+        '门锁开锁、门铃有人停留、摄像头移动、家电完成 —— 米家 App 里弹的那一条条通知'));
+      box.append(evCard('场景 · 自动化', 'i-bolt', scn,
+        '谁按了哪个无线开关、触发了哪个场景，米家自动化每跑一次记一条'));
+    });
+  }
+
+  /* ── 单屋环境详情：当前读数 + 电量 + 24 小时曲线 ── */
+  const envHist = {};
+
+  function envSpark(vals) {
+    const w = 240, hh = 42, pad = 3;
+    const mx = Math.max.apply(null, vals), mn = Math.min.apply(null, vals);
+    const sp = (mx - mn) || 1;
+    const n = vals.length;
+    const pts = vals.map((v, i) =>
+      (i / (n - 1) * w).toFixed(1) + ',' +
+      (hh - pad - (v - mn) / sp * (hh - pad * 2)).toFixed(1));
+    return '<svg class="spark" viewBox="0 0 ' + w + ' ' + hh + '" preserveAspectRatio="none">' +
+      '<polyline points="' + pts.join(' ') + '"/></svg>';
+  }
+
+  function envTrend(hi) {
+    const d = hi.now - hi.first;
+    if (!Number.isFinite(d)) return '—';
+    if (Math.abs(d) < 0.3) return '基本平稳';
+    return (d > 0 ? '升 ' : '降 ') + Math.abs(d).toFixed(1) + '°';
+  }
+
+  function openEnv(id) {
+    const r = (LH.rooms || []).find((x) => x.id === id);
+    if (!r) return;
+    clearInterval(state.pageTimer);
+    showLayer(r.name + ' · 温湿度', r.env || '温湿度计');
+    $('#layerBody').innerHTML = '<div class="cards layer-cards" id="envCards"></div>';
+    buildEnv(r);
+    loadEnvHist(r);
+    state.pageTimer = setInterval(() => {
+      if (!state.layer || !$('#envCards')) return clearInterval(state.pageTimer);
+      buildEnv(r);
+    }, 12000);
+  }
+
+  function buildEnv(r) {
+    const box = $('#envCards');
+    if (!box) return;
+    box.innerHTML = '';
+    const ts = st(r.temp);
+    const t = num(r.temp, null), hh = num(r.hum, null), b = num(r.batt, null);
+    const dead = !ts || ts.state === 'unavailable' || ts.state === 'unknown';
+    const upd = ts && ts.last_updated ? ago(ts.last_updated) : '—';
+    box.append(card('现在', 'i-temp', dead ? '离线' : '实时',
+      '<div class="kv"><b>' + (t == null ? '—' : t.toFixed(1)) + '</b>' +
+      '<span>°C 当前温度' + (hh == null ? '' : ' · 湿度 ' + Math.round(hh) + '%') + '</span></div>' +
+      '<div class="pwr">' +
+        '<div class="pwr-i"><em>湿度</em><b>' + (hh == null ? '—' : Math.round(hh) + '%') + '</b></div>' +
+        '<div class="pwr-i"><em>传感器电量</em><b>' + (b == null ? '—' : Math.round(b) + '%') + '</b></div>' +
+        '<div class="pwr-i"><em>上报于</em><b>' + upd + '</b></div>' +
+      '</div>' +
+      '<div class="card-sub">' + (dead
+        ? '这台温湿度计这会儿没上报（HA 里是 ' + (ts ? ts.state : '未知') + '）'
+        : (r.env || '温湿度计') + ' · 蓝牙上报，几分钟才变一次，曲线比数字更能看出走势') + '</div>'));
+    const hi = envHist[r.temp];
+    box.append(card('最近 24 小时', 'i-temp', hi && hi.n > 1 ? hi.n + ' 个数据点' : '',
+      !hi ? '<div class="card-sub">正在读 HA 的 24 小时历史…</div>'
+        : hi.n < 2 ? '<div class="card-sub">HA 里还没攒够这段历史（recorder 得跑一会儿才有）</div>'
+        : '<div class="pwr">' +
+          '<div class="pwr-i"><em>最高</em><b>' + hi.max.toFixed(1) + '°</b></div>' +
+          '<div class="pwr-i"><em>最低</em><b>' + hi.min.toFixed(1) + '°</b></div>' +
+          '<div class="pwr-i"><em>走势</em><b>' + envTrend(hi) + '</b></div>' +
+          '</div>' + envSpark(hi.pts) +
+          '<div class="card-sub">数据来自 HA 的 recorder，只画温度</div>'));
+    box.append(card(r.env || '这台温湿度计', 'i-plug', '',
+      '<div class="app-lines">' +
+        [['设备名', r.env || '—'], ['温度', r.temp || '—'], ['湿度', r.hum || '—'],
+         ['电量', r.batt || '—']].map((x) =>
+          '<div class="app-line"><span>' + x[0] + '</span><b class="env-ent">' + x[1] + '</b></div>').join('') +
+      '</div>' +
+      '<div class="card-sub">这三个实体属于同一台温湿度计；整台设备已接进本页，不再出现在「其他设备」里</div>'));
+  }
+
+  function loadEnvHist(r) {
+    const h = hass();
+    if (!h || !r.temp || envHist[r.temp]) return;
+    const t0 = new Date(Date.now() - 24 * 3600e3).toISOString();
+    h.callApi('GET', 'history/period/' + t0 + '?filter_entity_id=' + r.temp + '&minimal_response')
+      .then((res) => {
+        const vs = ((res && res[0]) || []).map((p) => parseFloat(p.state))
+          .filter((n) => Number.isFinite(n));
+        envHist[r.temp] = vs.length > 1
+          ? { n: vs.length, max: Math.max.apply(null, vs), min: Math.min.apply(null, vs),
+              first: vs[0], now: vs[vs.length - 1], pts: vs }
+          : { n: vs.length };
+        if (state.layer && $('#envCards')) buildEnv(r);
+      })
+      .catch(() => {
+        envHist[r.temp] = { n: 0 };
+        if (state.layer && $('#envCards')) buildEnv(r);
+      });
+  }
+
   /* ── 用电详情：顶部电量行 / 左栏「全屋」都能打开 ── */
   function openPower() {
     const P = pw();
@@ -5206,22 +5440,38 @@
         return `<div class="gate"><i class="${ok ? 'ok' : 'no'}"></i><span>${g.name}</span><b>${fmtGate(g.entity)}</b></div>`;
       }).join('')}</div>`));
 
+    /* 家里最近发生：门锁 / 门铃 / 摄像头 / 场景执行 */
+    if (evCfg().message || evCfg().scene) {
+      const ec = card('家里最近发生', 'i-bell', '读取中',
+        '<div class="ev-list"><div class="ev-empty">正在读取米家消息…</div></div>' +
+        '<div class="card-sub">门锁 · 门铃 · 摄像头 · 场景执行，点一下看最近 48 小时</div>');
+      ec.classList.add('tap');
+      ec.addEventListener('click', openEvents);
+      box.append(ec);
+      paintEventsCard(ec);
+    }
+
     /* 各屋温湿度：数据就是房间面板那一套（rooms[].temp / rooms[].hum），
        哪个屋子没传感器就整行跳过；按温度降序，最热/最潮的排在最前面。 */
     const envs = LH.rooms.map((r) => {
       const t = r.temp ? num(r.temp, null) : null;
       const hh = r.hum ? num(r.hum, null) : null;
-      return (t == null && hh == null) ? null : { n: r.name, t: t, h: hh };
+      return (t == null && hh == null) ? null : { id: r.id, n: r.name, t: t, h: hh };
     }).filter(Boolean);
     envs.sort((a, b) => (b.t == null ? -99 : b.t) - (a.t == null ? -99 : a.t));
     if (envs.length) {
       const avg = roomAvg('temp');
       const htm = '<div class="env-grid">' + envs.map((x) =>
-        `<div class="env-i"><span>${x.n}</span>` +
+        `<div class="env-i tap" data-env="${x.id}"><span>${x.n}</span>` +
         `<b>${x.t == null ? '—' : x.t.toFixed(1) + '°'}</b>` +
         `<em>${x.h == null ? '—' : Math.round(x.h) + '%'}</em></div>`).join('') + '</div>';
-      box.append(card('各屋温湿度', 'i-temp',
-        avg == null ? '实时' : '均温 ' + avg.toFixed(1) + '°', htm, true));
+      const ec = card('各屋温湿度', 'i-temp',
+        avg == null ? '实时' : '均温 ' + avg.toFixed(1) + '°',
+        htm + '<div class="card-sub">点一个屋子看这台温湿度计的电量、24 小时曲线和实体名</div>', true);
+      ec.querySelectorAll('[data-env]').forEach((b) => {
+        b.addEventListener('click', () => openEnv(b.dataset.env));
+      });
+      box.append(ec);
     }
 
     /* 电池 · 耗材：只列读得到数的（离线 / unknown 的实体整条跳过），
@@ -6734,7 +6984,8 @@
       chip.classList.toggle('on', on);
       chip.classList.toggle('low', !!(w && w.batt != null && w.batt <= WATCH_LOW));
       const line = w ? watchLine(w) : '';
-      chip.title = '家人 ' + (pi + 1) + ' · ' + (on ? '在家'
+      const nm = p.name || ('家人 ' + (pi + 1));
+      chip.title = nm + ' · ' + (on ? '在家'
         : ps.known ? '离家' : '检测中') +
         '（' + ps.ents.length + ' 台设备，任一在线即在家）' +
         (line ? ' · ' + line : '') + ' · 点开看详情';
@@ -7029,6 +7280,7 @@
         b.dataset.pi = pi;
         b.title = '家人 ' + (pi + 1) + ' · 按设备联网判定，点开看详情';
         b.innerHTML = '<svg><use href="#' + (p.watch ? 'i-watch' : 'i-user') + '"/></svg>' +
+          '<span class="nm">' + esc(p.name || ('家人 ' + (pi + 1))) + '</span>' +
           '<i class="d"></i>';
         b.addEventListener('click', () => openPerson(p, pi));
         pbar.append(b);

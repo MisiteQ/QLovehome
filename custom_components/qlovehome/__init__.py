@@ -631,6 +631,8 @@ async def ws_get_timers(hass, connection, msg):
         vol.Required("end"): vol.Coerce(float),
         vol.Required("act"): vol.In(["on", "off"]),
         vol.Optional("name", default=""): str,
+        vol.Optional("rep", default="once"): vol.In(["once", "daily", "weekly"]),
+        vol.Optional("days"): [vol.All(int, vol.Range(min=1, max=7))],
     }
 )
 @websocket_api.async_response
@@ -641,6 +643,8 @@ async def ws_set_timer(hass, connection, msg):
         "end": int(msg["end"]),
         "act": msg["act"],
         "n": msg.get("name") or "",
+        "rep": msg.get("rep") or "once",
+        "days": msg.get("days") or [],
     }
 
     def _save() -> dict:
@@ -730,7 +734,11 @@ async def ws_service_call(hass, connection, msg):
     connection.send_result(msg["id"], {"ok": True})
 
 
-@websocket_api.websocket_command({vol.Required("type"): WS_GET_AUDIT})
+@websocket_api.websocket_command({
+    vol.Required("type"): WS_GET_AUDIT,
+    vol.Optional("limit"): vol.Any(int, None),
+    vol.Optional("event"): vol.Any(str, None),
+})
 @websocket_api.async_response
 async def ws_get_audit(hass, connection, msg):
     """读取最近操作记录（审计日志）.
@@ -826,7 +834,13 @@ class QlhTimerView(_QlhBaseView):
             end = int(float(body.get("end")))
         except (TypeError, ValueError):
             return self.json({"error": "end must be epoch ms"}, status_code=400)
-        item = {"end": end, "act": act, "n": str(body.get("name") or "")}
+        item = {
+            "end": end,
+            "act": act,
+            "n": str(body.get("name") or ""),
+            "rep": body.get("rep") if body.get("rep") in ("once", "daily", "weekly") else "once",
+            "days": [int(d) for d in (body.get("days") or []) if isinstance(d, (int, float)) and 1 <= int(d) <= 7],
+        }
 
         def _save() -> dict:
             timers = _read_timers(self.hass)

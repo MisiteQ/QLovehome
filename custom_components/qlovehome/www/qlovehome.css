@@ -423,6 +423,10 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
   backdrop-filter: blur(8px);
 }
 .ppl-chip svg { width: 14px; height: 14px; color: var(--amber); opacity: .8; flex: none; }
+.ppl-chip .nm {
+  max-width: 5.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  letter-spacing: .02em;
+}
 .ppl-chip .d { width: 7px; height: 7px; border-radius: 50%; background: rgba(var(--fg), .22); flex: none; }
 .ppl-chip:hover { background: rgba(var(--hl), 0.095); border-color: rgba(var(--am), 0.3); color: var(--text); }
 .ppl-chip.on { color: var(--text); border-color: rgba(var(--am), 0.3); }
@@ -2650,3 +2654,46 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .lh-ed-plan-svg,
 .room-label,
 .marker { touch-action: none; }
+
+/* ── 概览 · 各屋温湿度可点 + 单屋 24 小时曲线 ── */
+.env-i.tap { cursor: pointer; border-radius: 7px; padding: 3px 6px; margin: -3px -6px; transition: background .15s; }
+.env-i.tap:hover { background: rgba(var(--hl), 0.06); }
+.env-i.tap:hover span { color: var(--text); }
+.spark { display: block; width: 100%; height: 46px; margin: 9px 0 3px; }
+.spark polyline {
+  fill: none; stroke: var(--amber); stroke-width: 1.6;
+  stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke;
+}
+.env-ent {
+  font-size: calc(10.5px * var(--fsk)); font-weight: 400;
+  color: var(--dim-2); word-break: break-all; text-align: right; max-width: 68%;
+}
+
+/* ── 概览 · 家里最近发生（米家消息 + 场景执行） ── */
+.ev-list { display: grid; gap: 1px; }
+.ev-i {
+  display: grid; grid-template-columns: 14px 50px minmax(0, 1fr); align-items: center; gap: 8px;
+  font-size: calc(11.5px * var(--fsk)); padding: 3px 0;
+  border-bottom: 1px solid rgba(var(--ln), .05);
+}
+.ev-i:last-child { border-bottom: 0; }
+.ev-i svg { width: 13px; height: 13px; color: var(--dim-2); }
+.ev-i .ev-t { color: var(--dim-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ev-i b {
+  font-weight: 400; color: rgba(var(--fg), 0.9);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ev-tl { display: grid; gap: 0; }
+.ev-l {
+  display: grid; grid-template-columns: 62px 15px minmax(0, 132px) minmax(0, 1fr);
+  align-items: baseline; gap: 8px;
+  font-size: calc(12px * var(--fsk)); padding: 6px 0;
+  border-bottom: 1px solid rgba(var(--ln), .05);
+}
+.ev-l:last-child { border-bottom: 0; }
+.ev-l .ev-t { color: var(--dim-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ev-l i { display: inline-flex; align-self: center; }
+.ev-l i svg { width: 13px; height: 13px; color: var(--dim-2); }
+.ev-l .ev-w { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-l b { font-weight: 400; color: var(--text); }
+.ev-empty { font-size: calc(11.5px * var(--fsk)); color: var(--dim-2); padding: 6px 0; }

@@ -1,6 +1,6 @@
 # 🏠 QLovehome · 全屋大屏
 
-[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.6%2B-blue.svg)](https://www.home-assistant.io/)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-blue.svg)](https://www.home-assistant.io/)
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![GitHub issues](https://img.shields.io/github/issues/MisiteQ/QLovehome.svg)](https://github.com/MisiteQ/QLovehome/issues)
@@ -9,7 +9,7 @@
 > ⚠️ **这是一个非常初级的版本，还有很多问题，后续会慢慢修改完善。** 有需要的朋友可以在 [Issues](https://github.com/MisiteQ/QLovehome/issues) 提需求，也欢迎自行下载改进。
 
 面向门口 / 客厅平板的 **Home Assistant 全屋大屏面板**。
-可作为 **HAOS 加载项（Add-on）** 或 **HACS 集成** 安装，零 YAML，零 Webpack——HTML + SVG + JS，源码可读可改。
+可作为 **HAOS 应用（原加载项 / Add-on）** 或 **HACS 集成** 安装，零 YAML，零 Webpack——HTML + SVG + JS，源码可读可改。
 
 ---
 
@@ -38,12 +38,14 @@ QLovehome（**其爱家** 哈哈哈）是怎么来的？
 | 🏠 **户型图** | 矢量 SVG，矩形 / 多边形 / 圆形房间，墙体自动融合一体 |
 | 🎛️ **中控** | 灯光 · 插座 · 空调（含**扫风模式**）· 风扇 · 窗帘统一开关 + 调光调色温 |
 | 📊 **概览** | 家人在线 · 用电 · 安防 · 温湿度 · 电池 · 摄像头 · 网络 · 天气 |
+| 🌡️ **环境曲线** | 点各屋温湿度 → 24 小时温度 / 湿度走势 |
+| 🔔 **家里最近发生** | 读取 HA 事件时间线（门锁、传感器、自动化等），一眼看到家里刚发生了什么 |
 | 📝 **最近动态** | 自动记录设备操控 · 定时设置 · 定时到点执行，JSONL 存服务器，可按事件类型筛选 |
 | ⏱️ **定时 / 倒计时** | 服务器端调度，关面板 / 退出账号也照跑，HA 重启自动恢复；支持手动输入分钟数 |
 | 🔌 **子设备绑定** | 热水器绑水量传感器、灯绑子灯组，子设备自动从户型图剔除 |
 | 🎨 **主题** | 深/浅色跟随日出日落 · 四季配色自动切换 · 房间色块温度感知 |
 | 😴 **屏保** | 无操作自动进待机大屏时钟 · 待机时间可配置 |
-| 🛠️ **编辑器** | 可视化画户型 · 从 HA 批量导入实体 · 空格平移画布 · 滚轮缩放 · 拖房间名字定位 |
+| 🛠️ **编辑器** | 可视化画户型 · 从 HA 批量导入实体 · 空格平移画布 · 滚轮缩放 · 拖房间名字定位 · **右键直接编辑设备/房间** · **方向键微调位置** |
 | 🔧 **个性化** | 字体大小 · 面板透明度 · 主题深浅 · 待机时间 · **全部存 HA 服务器**（换电脑/换浏览器不丢） |
 
 ---
@@ -66,9 +68,9 @@ QLovehome（**其爱家** 哈哈哈）是怎么来的？
 
 ## 🚀 安装
 
-### ⭐ 方式一：HAOS Add-on（推荐）
+### ⭐ 方式一：HAOS 应用（原 Add-on，推荐）
 
-**Home Assistant → 设置 → 加载项 → 右上角 ⋮ → 添加加载项仓库**
+**Home Assistant → 设置 → 应用 → 应用商店（App store，旧版叫「加载项」）→ 右上角 ⋮ → 添加应用仓库**
 
 URL：
 ```
@@ -81,11 +83,11 @@ https://github.com/MisiteQ/QLovehome
 - 安装完成后侧边栏自动出现 **QLovehome**
 - 前端 + 后端独立进程，HA 重启后自动恢复定时任务
 
-> 💡 详细 Add-on 说明见 [`qlovehome_addon/README.md`](qlovehome_addon/README.md)
+> 💡 详细应用安装说明见 [`qlovehome_addon/README.md`](qlovehome_addon/README.md)
 
 ### 方式二：HACS 自定义存储库（Integration 模式）
 
-如果不想用 Supervisor Add-on，也可以装成标准 HA 集成：
+如果不想用 Supervisor 应用，也可以装成标准 HA 集成：
 
 1. **HACS → 集成 → 右上角 ⋮ → 自定义存储库**
 2. URL 填：`https://github.com/MisiteQ/QLovehome`
@@ -167,9 +169,11 @@ python gen_qlovehome_data.py
 | 圆形房间 | 按住从圆心拖出半径 |
 | 多边形 | 逐点点击画异形 |
 | 双击房间 | 改名 / 拖拽房间名字移动 |
+| 右键设备 / 房间 | 直接打开对应的设备 / 房间编辑弹窗 |
+| <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> | 移动选中项 1px；按住 <kbd>Shift</kbd> 移动 10px（房间会带着房内设备一起走） |
 | <kbd>Delete</kbd> / <kbd>Backspace</kbd> | 删除选中 |
 | <kbd>Ctrl/⌘</kbd> / <kbd>Shift</kbd> + 点击 | 多选 |
-| 右键 | 取消当前操作 |
+| 右键空白处 | 取消当前操作 |
 
 ---
 
@@ -182,7 +186,7 @@ QLovehome/
 ├── .gitignore
 ├── .hacsignore
 │
-├── qlovehome_addon/                  # ⭐ HAOS Add-on（推荐）
+├── qlovehome_addon/                  # ⭐ HAOS 应用（原加载项，推荐）
 │   ├── config.yaml                   #   Add-on 元数据（slug/ingress/架构）
 │   ├── Dockerfile                    #   HA 基础镜像 + Alpine 预编译 aiohttp
 │   ├── run.sh                        #   入口脚本（bashio 自动注入环境变量）
@@ -199,7 +203,7 @@ QLovehome/
 │       ├── timer.py                  #     独立 asyncio 定时调度
 │       └── manifest.json             #     版本号来源（Dockerfile 拷进容器）
 │
-├── repository.yaml                   # ⚠️ 必须在仓库根，Supervisor 靠它识别加载项仓库
+├── repository.yaml                   # ⚠️ 必须在仓库根，Supervisor 靠它识别应用仓库
 │
 ├── custom_components/qlovehome/       # ⭐ HA Integration（备选，和 Add-on 共用前端）
 │   ├── __init__.py                    #   integration 注册 + WS/REST API
@@ -257,9 +261,9 @@ pwsh -File scripts/sync-www.ps1
 
 | 现象 | 原因 | 解决 |
 |---|---|---|
-| **Supervisor 添加仓库提示「无效的加载项仓库」** | 仓库里找不到根级 `repository.yaml` | 用最新代码（`repository.yaml` 已移到仓库根目录） |
-| **Add-on 安装卡在构建 / 构建失败** | 首次构建需拉 HA 基础镜像 + Alpine 包，网络慢 | 换 HA 的 Docker 镜像源后重试；看「加载项 → QLovehome → 日志」具体报错 |
-| **Add-on 启动后侧边栏没出现** | Ingress 面板未注册 / 浏览器缓存 | 重启加载项；清缓存；或直接访问 `http://<ha-ip>:8123/api/hassio_ingress/` 下对应链接 |
+| **Supervisor 添加仓库提示「无效的加载项仓库」** | 仓库里找不到根级 `repository.yaml` | 用最新代码（`repository.yaml` 已移到仓库根目录）；新版 HA 可能显示「无效的应用仓库」 |
+| **应用安装卡在构建 / 构建失败** | 首次构建需拉 HA 基础镜像 + Alpine 包，网络慢 | 换 HA 的 Docker 镜像源后重试；看「设置 → 应用 → QLovehome → 日志」具体报错 |
+| **应用启动后侧边栏没出现** | Ingress 面板未注册 / 浏览器缓存 | 重启应用；清缓存；或直接访问 `http://<ha-ip>:8123/api/hassio_ingress/` 下对应链接 |
 | 侧边栏没出现 QLovehome（集成模式） | panel 注册可能失败 | Dashboard 手动加 iframe 卡片 → `/qlh/www/index.html` |
 | 页面空白 | iframe 地址错 / 文件没传 / `?v=N` 没加 | 确认 Dashboard 卡片 URL；确认 `/config/www/qlovehome/` 下有 index.html |
 | 全是「—」 | 实体 ID 没换成你的 | 打开开发者工具 → 控制台输 `LH.rooms.map(r=>r.lxs)` 看实际读的是什么 |
@@ -276,6 +280,12 @@ pwsh -File scripts/sync-www.ps1
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| **v1.6.0** | 2026-11-07 | 🏠 **全量对齐 lovehome 数据**：设备 / 房间读数 / 家电页 / 电池耗材 / 家人 / 国网用电 / 摄像头 / 网关 / 常用设备 / 情景全部补齐（74 台设备、32 项读数、11 个家电），原有户型图、平面图底图、设备位置与自定义卡片/形状/大小原样保留。<br>🌡️ **新增环境 24 小时曲线**：概览「各屋温湿度」点任意一间 → 温度 / 湿度 24 小时走势。<br>🔔 **新增「家里最近发生」**：直接读取 HA 事件时间线，门锁、传感器、自动化等刚发生的事一屏可见。<br>🛠️ **户型编辑器增强**：右键设备 / 房间直接打开对应编辑弹窗；<kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 微调选中项（<kbd>Shift</kbd> 加速到 10px），移动房间时房内设备一起走，连续按键只记一次撤销。<br>👨‍👩‍👧 **顶栏家人 chip 显示姓名**（未填名字时回退「家人 N」）。 |
+| **v1.5.3** | 2026-11-07 | 🛠️ **户型编辑器多选对齐 / 等距平铺**：Ctrl / Shift 多选后可按左/中/右、上/中/下对齐，3 项以上支持水平 / 垂直等距平铺，房间按墙体包围盒计算、房内设备不重复位移。<br>🎨 **设备图标形状与大小**：圆形 / 方形 / 横条三种形状 + 60%~240% 缩放，编辑器右下角手柄直接拖大小。<br>📐 **斜墙拉直提示**：画异形房间时对接近水平/垂直的边给出拉直建议。<br>⚡ **顶栏预置默认情景**：回家 / 离家 / 观影 / 睡眠首次启动即可用。 |
+| **v1.5.2** | 2026-11-07 | 🎛️ **空调 / 热水器面板补齐并汉化**：同一台设备下的模式、风速、扫风、水温、杀菌等功能不再遗漏，选项统一显示中文。 |
+| **v1.5.1** | 2026-11-07 | 🐛 **设备主实体自动校正**：空调别被 `*_power` 开关占住、热水器别绑到水量传感器、灯别绑到指示灯，修复一批开关 / 灯具状态显示错误。<br>🛠️ 修复户型编辑器「图上添加设备」与空格平移画布的冲突。 |
+| **v1.5.0** | 2026-11-07 | 🔗 **设备 / 房间绑定集成卡片或加载项面板**：编辑器里可视化选择面板来源（Q飞牛+ 设备卡 / 带 Ingress 的加载项 / 自定义 YAML），Q飞牛+ 弹窗卡自动展开为完整设备面板，不用再点一层。 |
+| **v1.4.9** | 2026-11-07 | 🐛 修复窄屏 / 侧栏切换时响应式布局塌缩；补全「初级版本」声明。 |
 | **v1.4.8** | 2026-11-07 | 🎨 **户型图外墙虚线重做**：改为「房间并集 → 欧氏距离变换 → 等距外扩」，虚线沿全部外墙外侧 15px 一圈贴合（呼吸位由 5px 加到 15px），凹凸台阶、错层都能跟着折弯；外凸/内凹拐角统一成半径一致的圆弧（原实现是按边长 1/4 切角，长边被切掉一大块、短边几乎不动，所以有的角鼓、有的角带棱）。墙体同步改用同一套外扩轮廓 + `evenodd` 扣房间，墙带与拐角交接无缝隙、无锯齿。<br>🐛 **修复「批量导入看不到设备」**：设备卡片所在的列表是 column flex，卡片带 `overflow:hidden` 会让 `min-height:auto` 退化成 0，几十台设备被压成一条条 2px 细线（看着像空白列表）。给 `.bulk-dev-card` 加 `flex:0 0 auto`，卡片恢复正常高度。<br>🎨 **修复「批量导入整片字看不清」**：弹窗挂在 `body` 下、不在 `.screen` 里，浅色主题的 `--text` 作用不到它，继承下来的是 `:root` 的深色值（`#eceff4`），白底上等于白字；另外 `--bg1~3` 是透明度数字、`--s3` 是 RGB 通道串，被当颜色用属非法值（回退也不生效）。现在弹窗自己定死一套浅底深字（正文 `#1f2430`、次要 `#6b7280`、徽章 `#9a6414`），徽章不折行、设备名不拆字、实体 id 超长省略。<br>↔️ **长名字自动滚动**：添加 / 编辑设备时实体名（`friendly_name` 经常是「客厅小米智能多模网关子设备墙壁插座」这种）在实体选择下拉、批量导入的设备卡片与展开的实体列表、设备列表行里，只要放不下就自动横向来回滚动，短名字完全静止；只在真的溢出时才启动动画（CSS keyframes + JS 量 `scrollWidth`）。<br>🧭 **边栏收起后户型图铺满空出来的位置**：原来第三列恒定 384px（房间面板 / 常驻栏互斥占用），两块都关掉后右边仍空着 384px，户型永远停在屏幕偏左。现在 `.stage` 会按右列是否可见切 `rp-off`，两块都不在时第三列收成 0，配合原有的 `hide-side`（第一列收 0），户型自动铺满并重新居中；开房间面板 / 点「首页」恢复常驻栏时又自动让回去，全程带 `.32s` 列宽过渡。<br>🐛 **修复「设备开关是一根长条」**：`.crow .csw` 原来写了 `flex:1 1 auto`，开关被拉满整行；改为 `flex:none` + 靠右，恢复 40×23 的小圆角开关。<br>⚡ **状态刷新提速 + 修复「关了开关界面还显示开，必须刷新页面」**：① 去掉 `paintValues()` 里 `document.hidden` 提前返回（在 HA 的 iframe 里这个判断不可靠，一旦被判成 hidden，整屏就再也不刷新了）；② 2 秒轮询原本只刷房间面板 / 常驻栏，**漏了控制弹窗**——现在 `paintValues()` 也调 `refreshControl()`，弹窗里的「开启 / 关闭」不会再停在旧文案；③ 新增**乐观显示**：点下发命令时界面立即切到目标态（云端设备回报常要 1–5 秒），真实状态一到自动撤掉覆盖，8 秒仍没跟上则退回真实状态，命令失败也不会一直显示错的开/关；④ 原来只有 2 秒轮询这一条刷新源，再加 350ms 的 `hass.states` 引用比对 + 300ms 节流，灯基本 0.4 秒内就有反馈。 |
 | **v1.4.7** | 2026-11-06 | 🐛 **修复「顶部白条（QLovehome 标题栏）藏不掉」**：集成面板由 Home Assistant 的 `<hass-subpage>` 包着，那条白底标题栏是它 shadow DOM 里的 `.toolbar`（不是 `.header`），原先的样式注入既没扫 `hass-subpage` 这个标签、也没写 `.toolbar` 选择器，所以「隐藏 HA 顶栏」按钮和全屏联动都无效。现在把 `hass-subpage` / `ha-panel-app` 加入扫描列表，并把 `.toolbar` 藏掉的同时把 `.content` 高度补回 100%（否则底部会留 56px 空白） |
 | **v1.4.6** | 2026-11-06 | 🐛 **修复发布包 zip 路径分隔符错误**（v1.4.4/v1.4.5 的包都有这个问题）：.NET Framework 的 `Compress-Archive` / `ZipFile.CreateFromDirectory` 会把目录分隔符写成反斜杠 `\`，在 Linux 上解压后 `www\index.html` 变成一个**文件名**而不是 `www/` 目录，集成找不到前端文件 → 静态目录注册失败 → 面板 iframe 404 → HA 回落到自己的界面 → 又是无限套娃。`scripts/package.ps1` 改为手工写 zip 条目并强制正斜杠，打包时自检：出现反斜杠条目直接失败退出 |

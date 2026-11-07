@@ -194,7 +194,7 @@
       .then((devs) => pick(devs || [])).catch(() => []);
   }
 
-  /* 加载项：直接从 HA 侧边栏面板里找带 addon 配置的入口（不需要管理员） */
+  /* 应用（原加载项）：直接从 HA 侧边栏面板里找带 addon 配置的入口（不需要管理员） */
   function addonCandidates() {
     const h = haHass();
     const panels = (h && h.panels) || {};
@@ -269,7 +269,7 @@
     });
     loadAddonCandidates().then((list) => {
       fillSelect(addonSel, list, (cur && cur.addon) || '',
-        '未发现带 Ingress 页面的加载项');
+        '未发现带 Ingress 页面的应用（原加载项）');
     });
   }
 
@@ -284,7 +284,7 @@
     }
     if (mode === CARD_SRC_ADDON) {
       const slug = ($('#' + key + 'Addon', form) || {}).value || '';
-      if (!slug) throw new Error('请选择一个加载项');
+      if (!slug) throw new Error('请选择一个应用');
       return { type: 'qlh-addon', addon: slug };
     }
     if (mode === CARD_SRC_CUSTOM) {
@@ -300,7 +300,7 @@
         <select id="${key}Source">
           <option value="${CARD_SRC_NONE}">不使用 · QLovehome 原生面板</option>
           <option value="${CARD_SRC_QFN}">Q飞牛+ 完整设备面板</option>
-          <option value="${CARD_SRC_ADDON}">加载项 / 集成页面</option>
+          <option value="${CARD_SRC_ADDON}">应用 / 集成页面</option>
           <option value="${CARD_SRC_CUSTOM}">自定义 Lovelace 卡片（YAML · 高级）</option>
         </select>
       </label>
@@ -310,10 +310,10 @@
         </label>
       </div>
       <div id="${key}AddonWrap" class="lh-card-sub" hidden>
-        <label>选择加载项
-          <select id="${key}Addon"><option value="">正在读取加载项…</option></select>
+        <label>选择应用
+          <select id="${key}Addon"><option value="">正在读取应用…</option></select>
         </label>
-        <span class="hint">只列出侧边栏里有 Ingress 页面的加载项；打开时自动获取最新地址，不用自己填。</span>
+        <span class="hint">只列出侧边栏里有 Ingress 页面的应用（原加载项）；打开时自动获取最新地址，不用自己填。</span>
       </div>
       <div id="${key}YamlWrap" class="lh-card-sub" hidden>
         <label>Lovelace 卡片 YAML
@@ -552,6 +552,8 @@
           '<button class="lh-ed-tab" data-tab="devices" type="button">设备</button>' +
           '<button class="lh-ed-tab" data-tab="rooms" type="button">房间</button>' +
           '<button class="lh-ed-tab" data-tab="appliances" type="button">家电页</button>' +
+      '<button class="lh-ed-tab" data-tab="readouts" type="button">房间读数</button>' +
+      '<button class="lh-ed-tab" data-tab="supplies" type="button">电池 · 耗材</button>' +
           '<button class="lh-ed-tab" data-tab="overview" type="button">概览 · 家人 · 网关</button>' +
           '<button class="lh-ed-tab" data-tab="shell" type="button">侧栏 · 底栏</button>' +
           '<button class="lh-ed-tab" data-tab="chrome" type="button">顶栏 · 右侧栏</button>' +
@@ -581,6 +583,7 @@
     // 户型图快捷键：Delete/Backspace 批量删除选中，Esc 取消选择
     document.addEventListener('keydown', (e) => {
       if (!editState.open || editState.tab !== 'plan') return;
+      if ($('.lh-ed-dialog.open')) return;   // 设备/房间编辑弹窗打开时，方向键不动物件
       const tag = (e.target && e.target.tagName) || '';
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -594,6 +597,13 @@
         selected = { type: null, id: null };
         refreshPlanSelection();
         updatePlanInfo();
+      } else if (/^Arrow(Up|Down|Left|Right)$/.test(e.key)) {
+        if (!planMulti.size) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        nudgePlanSelection(dx, dy);
       }
     });
 
@@ -672,6 +682,8 @@
       case 'devices': return buildDevicesTab();
       case 'rooms': return buildRoomsTab();
       case 'appliances': return buildAppliancesTab();
+      case 'readouts': return buildReadoutsTab();
+      case 'supplies': return buildSuppliesTab();
       case 'overview': return buildOverviewTab();
       case 'shell': return buildShellTab();
       case 'chrome': return buildChromeTab();
@@ -949,7 +961,23 @@
     });
     svg.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      cancelDrawMode(svg, wrap);
+      /* 绘制 / 放设备中：右键先取消当前模式 */
+      if (editState.plan.drawMode || editState.plan.newRoomPts != null || editState.plan.placeDev) {
+        cancelDrawMode(svg, wrap);
+        return;
+      }
+      /* 右键设备 / 房间：选中并直接打开对应编辑界面 */
+      const devEl = e.target.closest && e.target.closest('.lh-ed-plan-dev');
+      if (devEl && devEl.dataset.devId) {
+        selectDevice(devEl.dataset.devId, false);
+        openDeviceEditor(devEl.dataset.devId);
+        return;
+      }
+      const roomEl = e.target.closest && e.target.closest('.lh-ed-plan-room, .lh-ed-plan-label');
+      if (roomEl && roomEl.dataset.roomId) {
+        selectRoom(roomEl.dataset.roomId, false);
+        openRoomEditor(roomEl.dataset.roomId);
+      }
     });
 
     /* ── 拖拽画房间（矩形 / 圆形）：按住拖动，松手成房 ── */
@@ -1646,6 +1674,69 @@
     const f = svg.querySelector('.lh-ed-plan-outline');
     const d = framePathString();
     if (f && d) f.setAttribute('d', d);
+  }
+
+  /* 方向键微调选中项：房间连同房内设备一起平移；
+     已经被选中房间带走的设备不再重复移动，免得走两倍距离。
+     连续按键（700ms 内）只留一次撤销快照，按住方向键不会塞满撤销栈。 */
+  let nudgeSnapAt = 0;
+  let nudgeRenderTimer = null;
+  let nudgeFrameTimer = null;
+  function nudgePlanSelection(dx, dy) {
+    if ((!dx && !dy) || !planMulti.size) return;
+    const svg = editorRoot ? $('.lh-ed-plan-svg', editorRoot) : null;
+    const roomIds = new Set();
+    planMulti.forEach((k) => { if (k.charAt(0) === 'r') roomIds.add(k.slice(2)); });
+    let moved = false;
+
+    planMulti.forEach((k) => {
+      if (k.charAt(0) === 'r') {
+        const r = (window.LH.rooms || []).find((x) => x.id === k.slice(2));
+        if (!r || !r.pts) return;
+        translateRoom(r, dx, dy);
+        moved = true;
+        if (!svg) return;
+        const poly = svg.querySelector(`.lh-ed-plan-room[data-room-id="${r.id}"]`);
+        if (poly) poly.setAttribute('points', r.pts);
+        const wall = svg.querySelector(`.lh-ed-plan-wall[data-room-id="${r.id}"]`);
+        if (wall) wall.setAttribute('points', r.pts);
+        const label = svg.querySelector(`.lh-ed-plan-label[data-room-id="${r.id}"]`);
+        if (label) label.setAttribute('transform', `translate(${r.lx} ${r.ly})`);
+      } else {
+        const d = (window.LH.devices || []).find((x) => x.id === k.slice(2));
+        if (!d || d.x == null || d.y == null) return;
+        if (d.room && roomIds.has(d.room)) return;   // 已随房间平移
+        d.x = Math.round((d.x + dx) * 10) / 10;
+        d.y = Math.round((d.y + dy) * 10) / 10;
+        moved = true;
+      }
+    });
+    if (!moved) return;
+
+    if (svg) {
+      /* 随房间平移的设备也要把图标 transform 同步过去 */
+      (window.LH.devices || []).forEach((d) => {
+        if (d.x == null || d.y == null) return;
+        if (!roomIds.has(d.room) && !planMulti.has('d:' + d.id)) return;
+        const g = svg.querySelector(`.lh-ed-plan-dev[data-dev-id="${d.id}"]`);
+        if (g) g.setAttribute('transform', `translate(${d.x} ${d.y})`);
+      });
+      /* 外轮廓重算有节流，这里等按键停下再补一次，保证最后一帧对齐 */
+      if (nudgeFrameTimer) clearTimeout(nudgeFrameTimer);
+      nudgeFrameTimer = setTimeout(() => { nudgeFrameTimer = null; refreshPlanFrame(svg); }, 120);
+    }
+
+    const now = Date.now();
+    if (now - nudgeSnapAt > 700) { nudgeSnapAt = now; pushUndo(); }
+    editState.dirty = true;
+    persistSoon();
+    updatePlanInfo();
+    /* 主页面预览不必每按一次都重绘，按键停下来再同步 */
+    if (nudgeRenderTimer) clearTimeout(nudgeRenderTimer);
+    nudgeRenderTimer = setTimeout(() => {
+      nudgeRenderTimer = null;
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
+    }, 350);
   }
 
   /* 房间整体拖动：按住房间内部拖动 → 多边形 + 名称标签 + 房里的设备一起平移 */
@@ -3422,6 +3513,165 @@
       if (isNew) {
         if (!window.LH.appliances) window.LH.appliances = [];
         window.LH.appliances.push(a);
+      }
+      markDirty();
+      devDialog.classList.remove('open');
+      rerenderEditorTab();
+    };
+  }
+
+  /* ══════════════════════════════════════════════════════
+   * Tab: 房间读数（房间面板里显示的传感器行）
+   * ══════════════════════════════════════════════════════ */
+  function buildReadoutsTab() {
+    const wrap = el('div', 'lh-ed-list-wrap');
+    const list = window.LH.readouts || (window.LH.readouts = []);
+    wrap.innerHTML = '<div class="lh-ed-list-head">' +
+      '<b>房间读数</b><span class="hint">共 ' + list.length + ' 条</span>' +
+      '<button class="lh-ed-btn primary" id="lhEdRoAdd" type="button">+ 添加读数</button>' +
+      '</div><div class="lh-ed-list" id="lhEdRoList"></div>';
+
+    const roList = $('#lhEdRoList', wrap);
+    list.forEach((r, i) => {
+      const row = el('div', 'lh-ed-row');
+      row.innerHTML = `<div class="lh-ed-row-main">
+        <div class="lh-ed-row-title">${r.name || '(无名称)'}</div>
+        <div class="lh-ed-row-sub">房间: <b>${roomNameSafe(r.room) || '—'}</b> · 单位: <b>${r.unit || '—'}</b> · 实体: ${r.entity || '—'}</div>
+      </div>
+      <div class="lh-ed-row-actions">
+        <button class="lh-ed-btn" type="button" data-i="${i}" data-act="edit">编辑</button>
+        <button class="lh-ed-btn danger" type="button" data-i="${i}" data-act="del">删除</button>
+      </div>`;
+      roList.appendChild(row);
+      row.querySelector('[data-act="edit"]').onclick = () => openReadoutEditor(i);
+      row.querySelector('[data-act="del"]').onclick = () => {
+        if (!confirm(`确定删除 "${r.name}"？`)) return;
+        window.LH.readouts.splice(i, 1);
+        markDirty(); rerenderEditorTab();
+      };
+    });
+    $('#lhEdRoAdd', wrap).onclick = () => openReadoutEditor(-1);
+    return wrap;
+  }
+
+  function openReadoutEditor(idx) {
+    const isNew = idx < 0;
+    const r = isNew ? { room: (window.LH.rooms[0] || {}).id || '', name: '新读数', entity: '', unit: '', digits: null, map: null }
+                    : window.LH.readouts[idx];
+    ensureDialog();
+    const mapTxt = r.map ? JSON.stringify(r.map, null, 1) : '';
+    $('#lhEdDevTitle', devDialog).textContent = isNew ? '添加读数' : '编辑读数';
+    const form = $('#lhEdDevForm', devDialog);
+    form.innerHTML = `
+      <label>名称<input id="rName" value="${(r.name || '').replace(/"/g, '&quot;')}"></label>
+      <label>实体 ID<input id="rEntity" value="${(r.entity || '').replace(/"/g, '&quot;')}" placeholder="sensor.xxx"></label>
+      <label>单位<input id="rUnit" value="${(r.unit || '').replace(/"/g, '&quot;')}" placeholder="如 % / °C，可留空"></label>
+      <label>小数位<input id="rDigits" type="number" min="0" max="4" value="${r.digits == null ? '' : r.digits}" placeholder="留空=原样显示"></label>
+      <label>所属房间<select id="rRoom">${(window.LH.rooms || []).map((x) =>
+        `<option value="${x.id}"${x.id === r.room ? ' selected' : ''}>${x.name}</option>`).join('')}</select></label>
+      <label>取值映射 (JSON，可选)<textarea id="rMap" rows="5" placeholder='{"Locked":"已上锁"}'>${mapTxt}</textarea></label>`;
+    devDialog.classList.add('open');
+    $('#lhEdDevSave', devDialog).onclick = () => {
+      const name = $('#rName', form).value.trim();
+      const entity = $('#rEntity', form).value.trim();
+      if (!name || !entity) { alert('名称和实体 ID 不能为空'); return; }
+      r.name = name;
+      r.entity = entity;
+      r.unit = $('#rUnit', form).value.trim();
+      const dg = $('#rDigits', form).value.trim();
+      r.digits = dg === '' ? null : Math.max(0, Math.min(4, parseInt(dg, 10) || 0));
+      r.room = $('#rRoom', form).value;
+      const mt = $('#rMap', form).value.trim();
+      try {
+        r.map = mt ? JSON.parse(mt) : null;
+      } catch (e) { alert('取值映射不是合法 JSON'); return; }
+      r.kind = 'sensor';
+      if (isNew) {
+        if (!window.LH.readouts) window.LH.readouts = [];
+        window.LH.readouts.push(r);
+      }
+      markDirty();
+      devDialog.classList.remove('open');
+      rerenderEditorTab();
+    };
+  }
+
+  /* ══════════════════════════════════════════════════════
+   * Tab: 电池 · 耗材（概览底部的提醒清单）
+   * ══════════════════════════════════════════════════════ */
+  function buildSuppliesTab() {
+    const wrap = el('div', 'lh-ed-list-wrap');
+    const sup = window.LH.supplies || (window.LH.supplies = { battery: [], consume: [] });
+    if (!Array.isArray(sup.battery)) sup.battery = [];
+    if (!Array.isArray(sup.consume)) sup.consume = [];
+    const total = sup.battery.length + sup.consume.length;
+    wrap.innerHTML = '<div class="lh-ed-list-head">' +
+      '<b>电池 · 耗材</b><span class="hint">共 ' + total + ' 项</span>' +
+      '<button class="lh-ed-btn primary" id="lhEdSupAdd" type="button">+ 添加</button>' +
+      '</div><div class="lh-ed-list" id="lhEdSupList"></div>';
+
+    const listEl = $('#lhEdSupList', wrap);
+    const groups = [
+      ['battery', '电池', 'sensor 的电池电量实体，按剩余百分比提醒'],
+      ['consume', '耗材', '滤芯 / 耗材剩余寿命实体，按剩余百分比提醒']
+    ];
+    groups.forEach(([key, label, hint]) => {
+      const head = el('div', 'lh-ed-list-head');
+      head.style.marginTop = '10px';
+      head.innerHTML = `<b>${label}</b><span class="hint">${sup[key].length} 项 · ${hint}</span>`;
+      listEl.appendChild(head);
+      sup[key].forEach((x, i) => {
+        const row = el('div', 'lh-ed-row');
+        row.innerHTML = `<div class="lh-ed-row-main">
+          <div class="lh-ed-row-title">${x.n || '(无名称)'}</div>
+          <div class="lh-ed-row-sub">实体: ${x.e || '—'}</div>
+        </div>
+        <div class="lh-ed-row-actions">
+          <button class="lh-ed-btn" type="button" data-act="edit">编辑</button>
+          <button class="lh-ed-btn danger" type="button" data-act="del">删除</button>
+        </div>`;
+        listEl.appendChild(row);
+        row.querySelector('[data-act="edit"]').onclick = () => openSupplyEditor(key, i);
+        row.querySelector('[data-act="del"]').onclick = () => {
+          if (!confirm(`确定删除 "${x.n}"？`)) return;
+          sup[key].splice(i, 1);
+          markDirty(); rerenderEditorTab();
+        };
+      });
+    });
+    $('#lhEdSupAdd', wrap).onclick = () => openSupplyEditor('battery', -1);
+    return wrap;
+  }
+
+  function openSupplyEditor(type, idx) {
+    const sup = window.LH.supplies || (window.LH.supplies = { battery: [], consume: [] });
+    const isNew = idx < 0;
+    const x = isNew ? { n: '', e: '' } : sup[type][idx];
+    ensureDialog();
+    $('#lhEdDevTitle', devDialog).textContent = isNew ? '添加电池 / 耗材' : '编辑电池 / 耗材';
+    const form = $('#lhEdDevForm', devDialog);
+    form.innerHTML = `
+      <label>类型<select id="sType">
+        <option value="battery"${type === 'battery' ? ' selected' : ''}>电池</option>
+        <option value="consume"${type === 'consume' ? ' selected' : ''}>耗材</option>
+      </select></label>
+      <label>名称<input id="sName" value="${(x.n || '').replace(/"/g, '&quot;')}" placeholder="如：智能门锁"></label>
+      <label>实体 ID<input id="sEntity" value="${(x.e || '').replace(/"/g, '&quot;')}" placeholder="sensor.xxx_battery_level"></label>`;
+    devDialog.classList.add('open');
+    $('#lhEdDevSave', devDialog).onclick = () => {
+      const nt = $('#sType', form).value;
+      const item = { n: $('#sName', form).value.trim(), e: $('#sEntity', form).value.trim() };
+      if (!item.n || !item.e) { alert('名称和实体 ID 不能为空'); return; }
+      if (!Array.isArray(sup[nt])) sup[nt] = [];
+      if (isNew) {
+        sup[nt].push(item);
+      } else {
+        if (nt !== type) {
+          sup[type].splice(idx, 1);
+          sup[nt].push(item);
+        } else {
+          sup[type][idx] = item;
+        }
       }
       markDirty();
       devDialog.classList.remove('open');
