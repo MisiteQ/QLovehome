@@ -14,7 +14,9 @@ window.LH = {
    "power": {}
   },
   "cameras": [],
-  "gates": []
+  "gates": [],
+  "sceneSeeded": true,
+  "sceneSeedVer": 2
  },
  "plan": {
   "w": 620,
@@ -133,7 +135,45 @@ window.LH = {
  ],
  "missing": [],
  "readouts": [],
- "scenes": [],
+ "scenes": [
+  {
+   "id": "sc_home",
+   "name": "回家",
+   "icon": "i-home",
+   "hint": "打开全屋灯光",
+   "actions": [{ "entity": "light.*", "service": "turn_on" }]
+  },
+  {
+   "id": "sc_leave",
+   "name": "离家",
+   "icon": "i-leave",
+   "hint": "关闭全屋灯光与影音",
+   "actions": [
+    { "entity": "light.*", "service": "turn_off" },
+    { "entity": "media_player.*", "service": "turn_off" }
+   ]
+  },
+  {
+   "id": "sc_movie",
+   "name": "观影",
+   "icon": "i-media",
+   "hint": "灯光调到 25%，打开影音",
+   "actions": [
+    { "entity": "light.*", "service": "turn_on", "brightness_pct": 25 },
+    { "entity": "media_player.*", "service": "turn_on" }
+   ]
+  },
+  {
+   "id": "sc_sleep",
+   "name": "睡眠",
+   "icon": "i-moon",
+   "hint": "关闭全屋灯光与影音",
+   "actions": [
+    { "entity": "light.*", "service": "turn_off" },
+    { "entity": "media_player.*", "service": "turn_off" }
+   ]
+  }
+ ],
  "filters": [
   {
    "id": "all",

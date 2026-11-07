@@ -348,6 +348,8 @@
     if (!window.LH.plan.w) window.LH.plan.w = 620;
     if (!window.LH.plan.h) window.LH.plan.h = 692;
     if (typeof window.LH_REPAIR_DEVICES === 'function') window.LH_REPAIR_DEVICES();
+    /* 服务器 / 缓存里的老配置没有情景 → 和主页一样补一套默认情景 */
+    if (typeof window.LH_SEED_SCENES === 'function') window.LH_SEED_SCENES(v);
     return true;
   }
 
@@ -1120,60 +1122,61 @@
   }
 
   /* ── 横平竖直检测 & 拉直 ──
-     检测：遍历所有边，计算角度是否偏离 0/90/180/270 超过 4°；圆形(24)/三角(3)/4 顶点矩形(0 斜边)跳过 */
+     只把「长墙」的斜边拉直；45° 的短斜边视为倒角，保持原样。
+     圆形(24)/三角(3)跳过，四边形只要有明显斜边就会提示。 */
+  function edgeGeom(a, b) {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    return {
+      dx, dy,
+      len: Math.hypot(dx, dy),
+      ang: Math.atan2(Math.abs(dy), Math.abs(dx)) * 180 / Math.PI
+    };
+  }
+  /* 倒角判定上限：房间短边的 30%，夹在 10–40px */
+  function chamferLimit(pts) {
+    const b = polyBBox(pts);
+    const minDim = Math.min(b[2] - b[0], b[3] - b[1]) || 40;
+    return Math.max(10, Math.min(40, minDim * 0.3));
+  }
+  function isChamferEdge(e, limit) {
+    return e.ang > 4 && e.ang < 86 && e.len <= limit && Math.abs(e.ang - 45) < 15;
+  }
   function shouldAxisAlign(pts) {
     const n = pts.length;
     if (n === 3) return false;                    // 三角形保留
     if (n >= 20 && n <= 30) return false;         // 24 段圆形保留
     if (n < 4) return false;
+    const limit = chamferLimit(pts);
     let slanted = 0;
     for (let i = 0; i < n; i++) {
-      const a = pts[i], b = pts[(i + 1) % n];
-      const dx = b[0] - a[0], dy = b[1] - a[1];
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
-      const ang = Math.atan2(Math.abs(dy), Math.abs(dx)) * 180 / Math.PI;
-      if (ang > 4 && ang < 86) slanted++;          // 4° < 偏角 < 86° → 明显斜边
+      const e = edgeGeom(pts[i], pts[(i + 1) % n]);
+      if (e.len < 0.5) continue;
+      if (e.ang > 4 && e.ang < 86 && !isChamferEdge(e, limit)) slanted++;
     }
-    if (!slanted) return false;
-    /* 4 顶点如果全是 0°/90° 就不算（即用户画的矩形）；只有 ≥5 顶点且有斜边才提示 */
-    if (n === 4 && slanted <= 1) return false;
-    return true;
+    return slanted > 0;
   }
 
-  /* 把一条斜线段拉直：根据主方向（水平 / 垂直）把另一端投影回轴 */
+  /* 把斜边拉直：保留主方向分量，把次方向归零。
+     倒角边整条跳过，所以倒角不会被拉成直角。 */
   function axisAlignPts(pts) {
     if (!pts || pts.length < 3) return pts;
-    /* 先算全局参考格：遍历所有边的 dx/dy，取"最常见的水平步长"和"最常见的垂直步长"
-       这是最朴素的办法 —— 找出现次数最多的 dx 和 dy 绝对值 */
-    const dxs = [], dys = [];
-    for (let i = 0; i < pts.length; i++) {
-      const a = pts[i], b = pts[(i + 1) % pts.length];
-      dxs.push(Math.abs(b[0] - a[0]));
-      dys.push(Math.abs(b[1] - a[1]));
-    }
-    dxs.sort((a, b) => a - b); dys.sort((a, b) => a - b);
-    const refDx = dxs[Math.floor(dxs.length * 0.3)] || 10;   // 下 30% 分位当参考格
-    const refDy = dys[Math.floor(dys.length * 0.3)] || 10;
-
-    /* 第一步：先把所有顶点"吸到网格"（对齐到 refDx / refDy 的整数倍）
-       但要保留房间整体质心 —— 先算质心平移到原点，吸格后再平移回来 */
-    const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
-    const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
-    const snapped = pts.map(([x, y]) => [
-      Math.round((x - cx) / refDx) * refDx + cx,
-      Math.round((y - cy) / refDy) * refDy + cy
-    ]);
-    /* 第二步：把每个斜边投影回轴（主方向上的分量保留，次方向归零）
-       但如果相邻两条斜边都是朝同一方向斜的（比如 L 形房间的对角线误判），别强行投影 */
-    const out = snapped.slice();
-    const n = out.length;
+    const n = pts.length;
+    const limit = chamferLimit(pts);
+    const chamfer = new Set();
     for (let i = 0; i < n; i++) {
-      const a = out[i], b = out[(i + 1) % n];
-      const dx = b[0] - a[0], dy = b[1] - a[1];
-      if (Math.abs(dx) < 0.3 || Math.abs(dy) < 0.3) continue;  // 本来就有一条是 0，已经对齐
-      const mainIsX = Math.abs(dx) >= Math.abs(dy);
-      if (mainIsX) out[(i + 1) % n][1] = a[1];  // 保留水平，归零垂直
-      else         out[(i + 1) % n][0] = a[0];  // 保留垂直，归零水平
+      if (isChamferEdge(edgeGeom(pts[i], pts[(i + 1) % n]), limit)) chamfer.add(i);
+    }
+    const out = pts.map((p) => [p[0], p[1]]);
+    /* 两遍：处理末边改动首顶点后，首边需要再校正一次 */
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < n; i++) {
+        if (chamfer.has(i)) continue;
+        const a = out[i], b = out[(i + 1) % n];
+        const e = edgeGeom(a, b);
+        if (e.len < 0.5 || e.ang <= 4 || e.ang >= 86) continue;
+        if (Math.abs(e.dx) >= Math.abs(e.dy)) out[(i + 1) % n][1] = a[1];
+        else out[(i + 1) % n][0] = a[0];
+      }
     }
     /* 去重（可能出现相邻顶点完全重合） */
     const dedup = [];
@@ -1181,17 +1184,23 @@
       const last = dedup[dedup.length - 1];
       if (!last || Math.abs(last[0] - p[0]) > 0.3 || Math.abs(last[1] - p[1]) > 0.3) dedup.push(p);
     }
-    return dedup.length >= 3 ? dedup : out;
+    const fin = dedup.length >= 3 ? dedup : out;
+    const result = fin.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
+    /* 安全阀：菱形这类四条斜边的房间拉直后会塌成一条线，这种情况保留原样 */
+    const before = Math.abs(signedArea(pts));
+    const after = Math.abs(signedArea(result));
+    if (!after || (before > 0 && after < before * 0.25)) return pts;
+    return result;
   }
 
   function askAxisAlign(pts, onDone) {
     const dlg = el('div', 'lh-ed-dialog');
     dlg.innerHTML =
-      '<div class="lh-ed-dialog-title">检测到斜边</div>' +
-      '<div class="lh-ed-dialog-body">新画的房间不是完全横平竖直的。' +
+      '<div class="lh-ed-dialog-title">检测到斜墙</div>' +
+      '<div class="lh-ed-dialog-body">新画的房间有不是横平竖直的墙。' +
       '<div style="margin:8px 0 14px;color:#8e97a5;font-size:12px;">' +
-      '「全部拉直」会把所有斜边投影回水平/垂直（最常用的选择）；' +
-      '「跳过」保留你的手绘原样（例如想做梯形房 / 六边形房）。</div></div>' +
+      '「全部拉直」会把长墙投影回水平/垂直，45° 倒角保持原样；' +
+      '「跳过」保留手绘原样（例如梯形房 / 六边形房）。</div></div>' +
       '<div class="lh-ed-dialog-actions">' +
       '<button class="lh-ed-btn primary" data-act="axis">全部拉直</button>' +
       '<button class="lh-ed-btn" data-act="keep">跳过</button>' +
@@ -1580,7 +1589,19 @@
       g.setAttribute('class', 'lh-ed-plan-dev');
       g.setAttribute('transform', `translate(${d.x} ${d.y})`);
       g.dataset.devId = d.id;
-      g.innerHTML = `<circle r="10" class="dot"></circle><text y="24" text-anchor="middle">${d.name}</text>`;
+      const gm = devGeom(d);
+      g.innerHTML = '<g class="mkin">' + edDevShapeHtml(gm) + '</g>' +
+        `<text y="${gm.h / 2 + 13}" text-anchor="middle">${esc(d.name)}</text>`;
+      /* 单选设备时右下角给一个缩放手柄，拖动直接改图标大小 */
+      if (selected.type === 'device' && selected.id === d.id && planMulti.size <= 1) {
+        const h = document.createElementNS(NS, 'circle');
+        h.setAttribute('class', 'lh-ed-resize');
+        h.setAttribute('cx', gm.w / 2 + 4);
+        h.setAttribute('cy', gm.h / 2 + 4);
+        h.setAttribute('r', 5);
+        h.addEventListener('pointerdown', (e) => startResizeDevice(e, d));
+        g.appendChild(h);
+      }
       g.addEventListener('pointerdown', (e) => startDragDevice(e, d));
       g.addEventListener('click', (e) => {
         if (editState.plan.placeDev || editState.plan.spaceHeld ||
@@ -1591,6 +1612,20 @@
     });
 
     return svg;
+  }
+
+  /* 设备图标形状 / 大小：和主界面 qlovehome.js 里的 devGeom 保持一致 */
+  function devGeom(d) {
+    const s = Math.max(0.6, Math.min(2.4, Number(d.size) || 1));
+    const shape = (d.shape === 'square' || d.shape === 'rect') ? d.shape : 'circle';
+    const w = shape === 'rect' ? 30 * s : 23 * s;
+    const h = shape === 'rect' ? 20 * s : 23 * s;
+    return { s, shape, w, h };
+  }
+  function edDevShapeHtml(g) {
+    if (g.shape === 'circle') return `<circle class="dot" r="${11.5 * g.s}"></circle>`;
+    const rx = Math.min(7, Math.min(g.w, g.h) * 0.22);
+    return `<rect class="dot" x="${-g.w / 2}" y="${-g.h / 2}" width="${g.w}" height="${g.h}" rx="${rx}"></rect>`;
   }
 
   /* 自动外轮廓路径：复用 qlovehome.js 的几何工具（LHGeo），保证和主界面完全一致。
@@ -1690,10 +1725,15 @@
     const ox = p0.x - (Number(r.lx) || 0);
     const oy = p0.y - (Number(r.ly) || 0);
     const g = svg.querySelector(`.lh-ed-plan-label[data-room-id="${roomId}"]`);
+    const poly = ptsOf(r.pts);
     function move(ev) {
       const p = svgPoint(svg, ev);
-      r.lx = Math.round((p.x - ox) * 10) / 10;
-      r.ly = Math.round((p.y - oy) * 10) / 10;
+      const nx = Math.round((p.x - ox) * 10) / 10;
+      const ny = Math.round((p.y - oy) * 10) / 10;
+      /* 名称只能拖到房间范围内：出了墙就停在最后一个合法位置 */
+      if (poly.length >= 3 && !pointInPoly([nx, ny], poly)) return;
+      r.lx = nx;
+      r.ly = ny;
       if (g) g.setAttribute('transform', `translate(${r.lx} ${r.ly})`);
     }
     function up() {
@@ -1747,9 +1787,28 @@
     if (planMulti.size > 1) {
       const nRoom = Array.from(planMulti).filter((k) => k.charAt(0) === 'r').length;
       const nDev = planMulti.size - nRoom;
+      const btn = (act, label, title) =>
+        `<button class="lh-ed-btn" data-align="${act}" type="button" title="${title}">${label}</button>`;
       info.innerHTML = `<b>已选中 ${planMulti.size} 项</b>（房间 ${nRoom} · 设备 ${nDev}）` +
+        '<span class="lh-ed-align-sep">对齐</span>' +
+        btn('left', '左', '左对齐（房间按左墙对齐）') +
+        btn('cx', '水平居中', '水平方向居中对齐') +
+        btn('right', '右', '右对齐（房间按右墙对齐）') +
+        btn('top', '上', '顶对齐（房间按上墙对齐）') +
+        btn('cy', '垂直居中', '垂直方向居中对齐') +
+        btn('bottom', '下', '底对齐（房间按下墙对齐）') +
+        '<span class="lh-ed-align-sep">等距平铺</span>' +
+        (planMulti.size >= 3
+          ? btn('dist-x', '水平', '水平方向等距平铺') + btn('dist-y', '垂直', '垂直方向等距平铺')
+          : '<span class="hint">选 3 项以上可等距</span>') +
         '<button class="lh-ed-btn danger" id="btnDelMulti" type="button">删除选中</button>' +
         '<button class="lh-ed-btn" id="btnClearMulti" type="button">取消选择</button>';
+      $$('[data-align]', info).forEach((b) => b.addEventListener('click', () => {
+        const m = b.dataset.align;
+        if (m === 'dist-x') distributePlanSelection('x');
+        else if (m === 'dist-y') distributePlanSelection('y');
+        else alignPlanSelection(m);
+      }));
       $('#btnDelMulti', info).addEventListener('click', deletePlanSelection);
       $('#btnClearMulti', info).addEventListener('click', () => {
         planMulti.clear();
@@ -1778,8 +1837,149 @@
         <button class="lh-ed-btn danger" id="btnDelDev">删除此设备</button>`;
       $('#btnDelDev', info).addEventListener('click', () => deleteDevice(d.id));
     } else {
-      info.textContent = '未选中：点击房间或设备图标来选择。拖动设备图标可移动位置。';
+      info.textContent = '未选中：点击房间或设备图标来选择；按住 Ctrl / Shift 点击可多选（多选后可对齐、等距平铺）。';
     }
+  }
+
+  /* ── 多选对齐 / 等距平铺 ─────────────────────────────
+     设备按图标实际宽高算包围盒；房间按多边形包围盒（四条边就是四面墙）算。
+     房间里的设备跟着房间一起走，所以同属选中房间的设备不再单独参与计算，
+     否则会被平移两次。 */
+  function planSelBoxes() {
+    const items = [];
+    const roomIds = new Set();
+    planMulti.forEach((k) => { if (k.charAt(0) === 'r') roomIds.add(k.slice(2)); });
+    planMulti.forEach((k) => {
+      if (k.charAt(0) === 'r') {
+        const r = (window.LH.rooms || []).find((x) => x.id === k.slice(2));
+        if (!r || !r.pts) return;
+        const b = polyBBox(ptsOf(r.pts));
+        items.push({ type: 'room', id: r.id, ref: r, x0: b[0], y0: b[1], x1: b[2], y1: b[3] });
+      } else {
+        const d = (window.LH.devices || []).find((x) => x.id === k.slice(2));
+        if (!d || d.x == null || d.y == null) return;
+        if (d.room && roomIds.has(d.room)) return;   // 由房间带着走
+        const g = devGeom(d);
+        items.push({ type: 'device', id: d.id, ref: d,
+          x0: d.x - g.w / 2, y0: d.y - g.h / 2, x1: d.x + g.w / 2, y1: d.y + g.h / 2 });
+      }
+    });
+    return items;
+  }
+
+  /* 房间整体平移：多边形 + 名称标签 + 房里的设备 */
+  function translateRoom(r, dx, dy) {
+    if (!r || !r.pts || (!dx && !dy)) return;
+    r.pts = ptsOf(r.pts).map(([x, y]) =>
+      [Math.round((x + dx) * 10) / 10, Math.round((y + dy) * 10) / 10].join(',')).join(' ');
+    r.lx = Math.round(((Number(r.lx) || 0) + dx) * 10) / 10;
+    r.ly = Math.round(((Number(r.ly) || 0) + dy) * 10) / 10;
+    (window.LH.devices || []).forEach((d) => {
+      if (d.room === r.id && d.x != null && d.y != null) {
+        d.x = Math.round((d.x + dx) * 10) / 10;
+        d.y = Math.round((d.y + dy) * 10) / 10;
+      }
+    });
+  }
+
+  function movePlanItem(it, dx, dy) {
+    if (!dx && !dy) return;
+    if (it.type === 'device') {
+      it.ref.x = Math.round((it.ref.x + dx) * 10) / 10;
+      it.ref.y = Math.round((it.ref.y + dy) * 10) / 10;
+    } else {
+      translateRoom(it.ref, dx, dy);
+    }
+    it.x0 += dx; it.x1 += dx; it.y0 += dy; it.y1 += dy;
+  }
+
+  function finishPlanLayout() {
+    markDirty();
+    rerenderEditorTab();
+    document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
+  }
+
+  function alignPlanSelection(mode) {
+    const items = planSelBoxes();
+    if (items.length < 2) { toastHint('至少选中 2 项才能对齐'); return; }
+    const minX = Math.min(...items.map((i) => i.x0));
+    const maxX = Math.max(...items.map((i) => i.x1));
+    const minY = Math.min(...items.map((i) => i.y0));
+    const maxY = Math.max(...items.map((i) => i.y1));
+    const avgCx = items.reduce((s, i) => s + (i.x0 + i.x1) / 2, 0) / items.length;
+    const avgCy = items.reduce((s, i) => s + (i.y0 + i.y1) / 2, 0) / items.length;
+    items.forEach((it) => {
+      let dx = 0, dy = 0;
+      if (mode === 'left') dx = minX - it.x0;
+      else if (mode === 'right') dx = maxX - it.x1;
+      else if (mode === 'cx') dx = avgCx - (it.x0 + it.x1) / 2;
+      else if (mode === 'top') dy = minY - it.y0;
+      else if (mode === 'bottom') dy = maxY - it.y1;
+      else if (mode === 'cy') dy = avgCy - (it.y0 + it.y1) / 2;
+      movePlanItem(it, dx, dy);
+    });
+    finishPlanLayout();
+  }
+
+  function distributePlanSelection(axis) {
+    const items = planSelBoxes();
+    if (items.length < 3) { toastHint('至少选中 3 项才能等距排列'); return; }
+    const horiz = axis === 'x';
+    items.sort((a, b) => (horiz ? a.x0 - b.x0 : a.y0 - b.y0));
+    const start = horiz ? Math.min(...items.map((i) => i.x0)) : Math.min(...items.map((i) => i.y0));
+    const end = horiz ? Math.max(...items.map((i) => i.x1)) : Math.max(...items.map((i) => i.y1));
+    const total = items.reduce((s, i) => s + (horiz ? i.x1 - i.x0 : i.y1 - i.y0), 0);
+    const gap = (end - start - total) / (items.length - 1);
+    let cursor = start;
+    items.forEach((it) => {
+      const size = horiz ? it.x1 - it.x0 : it.y1 - it.y0;
+      if (horiz) movePlanItem(it, cursor - it.x0, 0);
+      else movePlanItem(it, 0, cursor - it.y0);
+      cursor += size + gap;
+    });
+    finishPlanLayout();
+  }
+
+  /* ── 设备图标拖拽缩放 ─────────────────────────────── */
+  function startResizeDevice(e, d) {
+    if (editState.plan.spaceHeld) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const svg = e.currentTarget.ownerSVGElement;
+    if (!svg) return;
+    const g = svg.querySelector(`.lh-ed-plan-dev[data-dev-id="${d.id}"]`);
+    if (!g) return;
+    const p0 = svgPoint(svg, e);
+    const s0 = Math.max(0.6, Math.min(2.4, Number(d.size) || 1));
+    const dist0 = Math.hypot(p0.x - d.x, p0.y - d.y) || 1;
+    const move = (ev) => {
+      const p = svgPoint(svg, ev);
+      const dist = Math.hypot(p.x - d.x, p.y - d.y);
+      /* 0.05 一档，范围 60%–240% */
+      const ns = Math.round(Math.min(2.4, Math.max(0.6, s0 * dist / dist0)) * 20) / 20;
+      if (ns === d.size) return;
+      d.size = ns;
+      const gm = devGeom(d);
+      const mkin = g.querySelector('.mkin');
+      if (mkin) mkin.innerHTML = edDevShapeHtml(gm);
+      const tx = g.querySelector('text');
+      if (tx) tx.setAttribute('y', gm.h / 2 + 13);
+      const hd = g.querySelector('.lh-ed-resize');
+      if (hd) {
+        hd.setAttribute('cx', gm.w / 2 + 4);
+        hd.setAttribute('cy', gm.h / 2 + 4);
+      }
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      if (Math.abs(d.size - 1) < 0.03) delete d.size;
+      markDirty();
+      rerenderEditorTab();
+      document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
   }
 
   /* ── 设备拖动 ─────────────────────────────────────── */
@@ -2034,6 +2234,15 @@
       const eid = hiddenInp.value;
       const states = haStates();
       if (!eid || !states) { statusEl.hidden = true; return; }
+      /* 「light.*」是整域通配（情景里常用），不算拼错 */
+      if (eid.slice(-2) === '.*') {
+        const dom = eid.slice(0, -2) + '.';
+        const n = Object.keys(states).filter((e) => e.indexOf(dom) === 0).length;
+        statusEl.hidden = false;
+        statusEl.className = 'lh-ent-status ' + (n ? 'ok' : 'bad');
+        statusEl.textContent = n ? '✓ ' + eid + ' · 通配到 ' + n + ' 个实体' : '⚠ ' + eid + ' · 没有匹配的实体';
+        return;
+      }
       const s = states[eid];
       statusEl.hidden = false;
       if (s) {
@@ -2819,6 +3028,10 @@
          <svg viewBox="0 0 24 24"><use href="#${KIND_ICON[k] || 'i-wave'}"></use></svg><span>${label}</span>
        </button>`).join('');
 
+    /* 图标形状 / 大小（默认圆形、100%，老配置没这两项也能正常显示） */
+    const dShape = (d.shape === 'square' || d.shape === 'rect') ? d.shape : 'circle';
+    const dSize = Math.max(0.6, Math.min(2.4, Number(d.size) || 1));
+
     form.innerHTML = `
       <label>HA 主实体（从真实设备里选，选完自动定类型和名字）
         <input id="dEntity" value="${(d.entity || '').replace(/"/g, '&quot;')}" placeholder="点击输入框从 HA 实体列表选择">
@@ -2832,6 +3045,17 @@
         <select id="dRoom">
           <option value="">— 无 —</option>${roomOptions}
         </select>
+      </label>
+      <label>图标形状
+        <div class="kind-row" id="dShapeRow">
+          <button type="button" class="kind-ico${dShape === 'circle' ? ' on' : ''}" data-shape="circle">圆形</button>
+          <button type="button" class="kind-ico${dShape === 'square' ? ' on' : ''}" data-shape="square">正方形</button>
+          <button type="button" class="kind-ico${dShape === 'rect' ? ' on' : ''}" data-shape="rect">长方形</button>
+        </div>
+        <input type="hidden" id="dShape" value="${dShape}">
+      </label>
+      <label>图标大小 <span class="hint" id="dSizeVal" style="margin-left:.4em">${Math.round(dSize * 100)}%</span>
+        <input id="dSize" type="range" min="0.6" max="2.4" step="0.1" value="${dSize}">
       </label>
       <div class="form-row">
         <label>X 坐标<input id="dX" type="number" step="0.1" value="${d.x ?? ''}" placeholder="可选"></label>
@@ -2922,6 +3146,17 @@
       $$('.kind-ico', form).forEach((x) => x.classList.toggle('on', x === b));
     });
 
+    // 图标形状 / 大小
+    $('#dShapeRow', form).addEventListener('click', (e) => {
+      const b = e.target.closest('[data-shape]');
+      if (!b) return;
+      $('#dShape', form).value = b.dataset.shape;
+      $$('[data-shape]', form).forEach((x) => x.classList.toggle('on', x === b));
+    });
+    $('#dSize', form).addEventListener('input', () => {
+      $('#dSizeVal', form).textContent = Math.round(Number($('#dSize', form).value) * 100) + '%';
+    });
+
     // 子设备绑定：实体选择器 + 添加/删除
     if (!d.children) d.children = [];
     const childInput = $('#dChildInput', form);
@@ -2985,6 +3220,12 @@
       const yv = $('#dY', form).value;
       if (xv !== '') d.x = parseFloat(xv); else delete d.x;
       if (yv !== '') d.y = parseFloat(yv); else delete d.y;
+
+      // 图标形状 / 大小：默认值不写入配置，保持配置干净
+      const shape = $('#dShape', form).value;
+      if (shape === 'square' || shape === 'rect') d.shape = shape; else delete d.shape;
+      const size = Math.max(0.6, Math.min(2.4, Number($('#dSize', form).value) || 1));
+      if (Math.abs(size - 1) > 0.001) d.size = Math.round(size * 100) / 100; else delete d.size;
 
       // 保存校验：实体必须真实存在于 HA（用户要求设备都来自 HA）
       const states = haStates();
@@ -3349,7 +3590,9 @@
     wrap.innerHTML = `
       <div class="lh-ed-section">
         <h4>顶栏 · 情景按钮 <small class="lh-ed-hint">时钟右边那排；家人与天气在「概览 · 家人 · 网关」里设置</small></h4>
-        <div class="hint">按钮按这里的顺序排列，点一下依次下发下面配置的实体（直接填 HA 实体即可，不要求先在设备页登记）。</div>
+        <div class="hint">按钮按这里的顺序排列，点一下依次下发下面配置的实体（直接填 HA 实体即可，不要求先在设备页登记）。
+          支持整域通配：填 <b>light.*</b> / <b>media_player.*</b> 会在点按情景时展开成该域的全部实体（默认已预置 回家 / 离家 / 观影 / 睡眠 四个）。
+          第一列下拉只是<b>图标样式</b>（其中「家人」是头像图标），不代表绑定家人档案；家人请在「概览 · 家人 · 网关」里添加。</div>
         <div id="scList" class="lh-ed-plist"></div>
         <button class="lh-ed-btn" id="scAdd" type="button">+ 添加情景</button>
       </div>
@@ -3655,13 +3898,16 @@
         </details>
       </div>
       <div class="lh-ed-section">
-        <h4>家人在线 <small class="lh-ed-hint">一位家人可挂多台设备（手机 / 手表 / 平板），任意一台在线即算在家；填 Ping 集成生成的 binary_sensor.* 或 device_tracker.*</small></h4>
+        <h4>家人在线 <small class="lh-ed-hint">填称呼 + 挂设备（手机 / 手表 / 平板），任意一台在线即算在家；设备填 Ping 集成生成的 binary_sensor.* 或 device_tracker.*。保存后顶栏会自动出现这位家人的头像 chip</small></h4>
         <div id="peopleList" class="lh-ed-pgrp">${(ov.people || []).map((p, i) => {
           const ents = personEnts(p);
           if (!ents.length) ents.push('');
           return `<div class="lh-ed-pgrp-i">
             <div class="lh-ed-pgrp-h"><span>家人 ${i + 1}</span>
               <button type="button" class="lh-ed-btn danger" data-pdel="${i}">删家人</button></div>
+            <div class="lh-ed-person">
+              <input value="${String(p.name || '').replace(/"/g, '&quot;')}" data-pf="name" data-pi="${i}" placeholder="称呼（如：齐齐）">
+            </div>
             ${ents.map((e, j) => `<div class="lh-ed-person">
               <input value="${String(e || '').replace(/"/g, '&quot;')}" data-pf="entities" data-pi="${i}" data-pj="${j}" placeholder="设备 ${j + 1} · binary_sensor / device_tracker">
               ${ents.length > 1 ? `<button type="button" class="lh-ed-btn" data-pdelent="${i}:${j}" title="移除这台设备">−</button>` : ''}
@@ -3753,6 +3999,16 @@
       ov.people.push({ entity: '', entities: [''] });
       rerenderEditorTab();
     };
+    wrap.querySelectorAll('[data-pf="name"]').forEach((inp) => {
+      inp.oninput = () => {
+        const i = Number(inp.dataset.pi);
+        const p = ov.people[i] || (ov.people[i] = {});
+        const v = inp.value.trim();
+        if (v) p.name = v; else delete p.name;
+        markDirty();
+      };
+      inp.onchange = () => document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
+    });
     wrap.querySelectorAll('[data-pf="entities"]').forEach((inp) => {
       inp.oninput = () => {
         const i = Number(inp.dataset.pi), j = Number(inp.dataset.pj);

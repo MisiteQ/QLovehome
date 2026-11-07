@@ -705,14 +705,14 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .marker .mkin { transition: transform .16s ease-out; transform-box: fill-box; transform-origin: center; }
 .marker:hover .mkin { transform: scale(1.12); }
 .marker .halo { fill: url(#halo); opacity: 1; pointer-events: none; transition: opacity .3s; }
-.marker circle.dot { fill: var(--amber); filter: drop-shadow(0 3px 9px rgba(var(--am), 0.42)); }
+.marker .dot { fill: var(--amber); filter: drop-shadow(0 3px 9px rgba(var(--am), 0.42)); }
 .marker .ico { fill: none; stroke: #2b2115; stroke-width: 1.7; }
 .marker.off .halo { opacity: 0; }
 /* 悬停即亮光圈：明确告诉用户「这里是个可点的设备」，关态也亮 */
 .marker:hover .halo { opacity: 1; }
 .marker.off:hover .halo { opacity: .5; }
 .marker:hover .dot { stroke: var(--amber-2); stroke-width: 1.2; }
-.marker.off circle.dot { fill: rgba(var(--am), 0.10); stroke: rgba(var(--am), 0.52); stroke-width: 1.1; filter: none; }
+.marker.off .dot { fill: rgba(var(--am), 0.10); stroke: rgba(var(--am), 0.52); stroke-width: 1.1; filter: none; }
 .marker.off .ico { stroke: rgba(var(--am), 0.78); }
 /* 筛选：不匹配的设备整个隐去（淡出 + 内层缩小，外层 translate 不动） */
 .marker.dim { opacity: 0; pointer-events: none; }
@@ -728,22 +728,22 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .screen[data-theme=light] .marker .cap { fill: rgba(255, 252, 245, 0.94); }
 .screen[data-theme=light] .marker.off .cap { fill: rgba(252, 248, 240, 0.92); }
 /* 亮态：底色压深一档，近白图标 5.4:1（改前 3.8:1） */
-.screen[data-theme=light] .marker circle.dot { fill: #8a5f1e; filter: drop-shadow(0 3px 8px rgba(var(--am), 0.3)); }
+.screen[data-theme=light] .marker .dot { fill: #8a5f1e; filter: drop-shadow(0 3px 8px rgba(var(--am), 0.3)); }
 /* 关态：浅盘 + 深琥珀图标 5.5:1；外圈 .92 让圆盘在浅色房间块上有轮廓 */
-.screen[data-theme=light] .marker.off circle.dot {
+.screen[data-theme=light] .marker.off .dot {
   fill: rgba(var(--am), 0.2);
   stroke: rgba(var(--am), 0.92);
   stroke-width: 1.2;
 }
 .screen[data-theme=light] .marker.off .ico { stroke: #6f4d16; stroke-width: 2.1; }
-.screen[data-theme=light] .marker:hover circle.dot { stroke: var(--amber-2); stroke-width: 1.4; }
+.screen[data-theme=light] .marker:hover .dot { stroke: var(--amber-2); stroke-width: 1.4; }
 
 /* ── 现实风格（照片底）上的设备状态 ──
    扁平皮肤那套「琥珀实心 / 10% 幽灵」压在照片上几乎看不出差别：照片本身又深又花，
    淡琥珀点既不够亮、幽灵态也不够暗。这里按 lovehome 的实拍调校值改成：
    亮着的设备 = 亮金实心 + 一圈白光晕 + 深褐图标，关着的保持幽灵态（不发光），
    一眼就能分出「在不在干活」。 */
-.screen[data-skin=real] .marker:not(.off) circle.dot {
+.screen[data-skin=real] .marker:not(.off) .dot {
   fill: #f5bb3f;
   filter: drop-shadow(0 0 3px rgba(255, 255, 255, .95))
           drop-shadow(0 0 9px rgba(255, 255, 255, .72))
@@ -751,7 +751,7 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 }
 .screen[data-skin=real] .marker:not(.off) .ico { stroke: #4a3210; }
 .screen[data-skin=real] .marker:not(.off) .halo { opacity: 1; }
-.screen:not([data-theme=light])[data-skin=real] .marker:not(.off) circle.dot { fill: #ffd98a; }
+.screen:not([data-theme=light])[data-skin=real] .marker:not(.off) .dot { fill: #ffd98a; }
 /* 关态在照片上要更「沉」：底盘压深、图标降低对比，和亮态拉开 */
 .screen[data-skin=real] .marker.off .cap { fill: rgba(9, 12, 18, 0.78); }
 .screen[data-skin=real] .marker.off .ico { stroke: rgba(var(--am), 0.62); }
@@ -2086,6 +2086,13 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 }
 .lh-ed-plan-label { cursor: move; }
 .lh-ed-plan-label text { pointer-events: all; }
+/* 设备图标右下角的缩放手柄：单选设备时出现 */
+.lh-ed-plan-dev .lh-ed-resize {
+  fill: #fff; stroke: #b08a5a; stroke-width: 1.6;
+  cursor: nwse-resize;
+}
+.lh-ed-plan-dev .lh-ed-resize:hover { fill: #b08a5a; }
+.lh-ed-plan-canvas.space-pan .lh-ed-resize { display: none; }
 .lh-ed-plan-room-name {
   fill: #2a3140; font-size: 11px; font-weight: 600;
   text-anchor: middle; dominant-baseline: middle;
@@ -2125,6 +2132,10 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
 .lh-ed-plan-info b { color: #a2733a; }
+.lh-ed-align-sep {
+  color: #8e97a5; font-size: 11.5px; padding-left: 4px;
+  border-left: 1px solid #d9dde4; margin-left: 2px;
+}
 
 /* 底图栏 */
 .lh-ed-photo-bar {
@@ -2278,6 +2289,18 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
   outline: none; border-color: #b08a5a; background: #fdfaf5;
 }
 .lh-ed-dialog-form input[readonly] { opacity: .5; cursor: not-allowed; }
+/* 图标大小滑块：不要输入框的边框和内边距 */
+.lh-ed-dialog-form input[type=range] {
+  padding: 0; border: none; background: transparent;
+  -webkit-appearance: none; appearance: none; height: 20px;
+}
+.lh-ed-dialog-form input[type=range]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 4px; background: #e0e4ea;
+}
+.lh-ed-dialog-form input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px;
+  border-radius: 50%; background: #b08a5a; border: none; cursor: pointer;
+}
 .lh-ed-dialog-form .form-row {
   display: flex; gap: 10px;
 }

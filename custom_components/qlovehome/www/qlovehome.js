@@ -134,6 +134,48 @@
   }
   window.LH_REPAIR_DEVICES = repairDevices;
 
+  /* 默认情景：实体用「域.*」通配，运行时展开，不用先建好设备
+     （见 applyScene 里的 expandSceneTarget） */
+  function defaultScenes() {
+    return [
+      { id: 'sc_home', name: '回家', icon: 'i-home', hint: '打开全屋灯光',
+        actions: [{ entity: 'light.*', service: 'turn_on' }] },
+      { id: 'sc_leave', name: '离家', icon: 'i-leave', hint: '关闭全屋灯光与影音',
+        actions: [{ entity: 'light.*', service: 'turn_off' },
+                  { entity: 'media_player.*', service: 'turn_off' }] },
+      { id: 'sc_movie', name: '观影', icon: 'i-media', hint: '灯光调到 25%，打开影音',
+        actions: [{ entity: 'light.*', service: 'turn_on', brightness_pct: 25 },
+                  { entity: 'media_player.*', service: 'turn_on' }] },
+      { id: 'sc_sleep', name: '睡眠', icon: 'i-moon', hint: '关闭全屋灯光与影音',
+        actions: [{ entity: 'light.*', service: 'turn_off' },
+                  { entity: 'media_player.*', service: 'turn_off' }] }
+    ];
+  }
+
+  /* 把默认情景追加到现有情景后面（已有的同名 id 跳过）；sceneSeedVer=2 记住
+     「已经补过」，用户之后把情景删光也不会被反复塞回来。
+     版本号用于升级：上一版只会在情景为空时补，已置 sceneSeeded=true 的老配置
+     也要把默认情景追加进去，所以不能只看 sceneSeeded。 */
+  function seedScenes(cfg) {
+    const conf = window.LH && window.LH.config;
+    if (!conf) return 0;
+    if (Number(conf.sceneSeedVer) >= 2) return 0;
+    const arr = window.LH.scenes || (window.LH.scenes = []);
+    /* 已补过且被用户删光 → 尊重用户选择，只升级标记 */
+    if (conf.sceneSeeded && !arr.length) { conf.sceneSeedVer = 2; return 1; }
+    const have = {};
+    arr.forEach((s) => { if (s && s.id) have[s.id] = 1; });
+    const add = defaultScenes().filter((s) => !have[s.id]);
+    arr.push.apply(arr, add);
+    if (cfg && typeof cfg === 'object') cfg.scenes = arr;
+    conf.sceneSeeded = true;
+    conf.sceneSeedVer = 2;
+    if (!add.length) return 0;
+    return 1;
+  }
+  /* 编辑器也走同一个补默认逻辑（它有自己的 applyConfigObject） */
+  window.LH_SEED_SCENES = seedScenes;
+
   /* 把配置对象覆盖到 window.LH（返回覆盖到的段数） */
   function applyCfg(cfg) {
     if (!cfg || typeof cfg !== 'object') return 0;
@@ -144,11 +186,15 @@
     ['rooms', 'devices', 'readouts', 'scenes', 'filters', 'appliances'].forEach((k) => {
       if (!Array.isArray(window.LH[k])) window.LH[k] = [];
     });
-    if (!window.LH.config || typeof window.LH.config !== 'object') window.LH.config = {};
+    if (!window.LH.config || typeof window.LH.config !== 'object') {
+      window.LH.config = cfg.config = {};
+    }
     if (!window.LH.plan || typeof window.LH.plan !== 'object') window.LH.plan = {};
     if (!window.LH.plan.w) window.LH.plan.w = 620;
     if (!window.LH.plan.h) window.LH.plan.h = 692;
     repairDevices();
+    /* 老配置里 scenes 是空的 → 补默认情景（1=补了情景，2=只补标记，都要回写） */
+    window.LH.__sceneSeed = seedScenes(cfg);
     return n;
   }
 
@@ -2242,24 +2288,42 @@
     return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
   }
 
+  /* 设备图标的形状 / 大小（编辑器里可调）：圆形、正方形、长方形，size 1 = 默认大小 */
+  function devGeom(d) {
+    const s = Math.max(0.6, Math.min(2.4, Number(d.size) || 1));
+    const shape = (d.shape === 'square' || d.shape === 'rect') ? d.shape : 'circle';
+    const w = shape === 'rect' ? 30 * s : 23 * s;
+    const h = shape === 'rect' ? 20 * s : 23 * s;
+    return { s, shape, w, h };
+  }
+  function devShapeHtml(g) {
+    if (g.shape === 'circle') {
+      return '<circle class="halo" r="' + (19 * g.s) + '"/>' +
+        '<circle class="cap" r="' + (12 * g.s) + '"/>' +
+        '<circle class="hit" r="' + (14 * g.s) + '"/>' +
+        '<circle class="dot" r="' + (11.5 * g.s) + '"/>';
+    }
+    const hw = g.w / 2, hh = g.h / 2;
+    const rx = Math.min(7, Math.min(g.w, g.h) * 0.22);
+    const rc = (cls, pad) => '<rect class="' + cls + '" x="' + (-hw - pad) + '" y="' + (-hh - pad) +
+      '" width="' + (g.w + pad * 2) + '" height="' + (g.h + pad * 2) + '" rx="' + rx + '"/>';
+    return '<ellipse class="halo" rx="' + (hw * 1.7) + '" ry="' + (hh * 1.7) + '"/>' +
+      rc('cap', 0.5) + rc('hit', 3) + rc('dot', 0);
+  }
+
   function marker(d) {
     const g = document.createElementNS(NS, 'g');
     g.setAttribute('class', 'marker' + (isGlow(d) ? '' : ' off'));
     g.dataset.dev = d.id;
     g.dataset.kind = d.kind;
     g.setAttribute('transform', `translate(${d.x} ${d.y})`);
+    const gm = devGeom(d);
+    const icon = 14 * gm.s;
     g.innerHTML =
       `<title>${esc(d.name)}</title>` +
       '<g class="mkin">' +
-        '<circle class="halo" r="19"/>' +
-        // cap：不透明底盘。关态的 dot 只有 10% 填充，房间色块会透过来，
-        // 看着像图标陷在色块里、点在色块上，所以垫一层实心底把它托起来
-        '<circle class="cap" r="12"/>' +
-        // hit 半径不能太大：相邻设备中心距最小 26，超过 13 会让两个热区互相压住，
-        // 变成「点 A 弹出 B」。14 略大于视觉半径 11.5，够用且不至于误伤
-        '<circle class="hit" r="14"/>' +
-        '<circle class="dot" r="11.5"/>' +
-        `<use class="ico" href="#${ICON[d.kind] || 'i-wave'}" x="-7" y="-7" width="14" height="14"/>` +
+        devShapeHtml(gm) +
+        `<use class="ico" href="#${ICON[d.kind] || 'i-wave'}" x="${-icon / 2}" y="${-icon / 2}" width="${icon}" height="${icon}"/>` +
       '</g>';
     g.addEventListener('click', (e) => { e.stopPropagation(); tapDevice(d); });
     return g;
@@ -2340,6 +2404,20 @@
   }
 
   /* ── 情景（真实脚本） ── */
+  /* 情景目标：支持「light.*」这种整域通配，运行时再从 hass.states 展开，
+     这样默认情景不用提前绑定具体实体 */
+  function expandSceneTarget(sel) {
+    const s = String(sel || '').trim();
+    if (!s) return [];
+    if (s.slice(-2) === '.*') {
+      const dom = s.slice(0, -2);
+      const h = hass();
+      const st = (h && h.states) || {};
+      return Object.keys(st).filter((e) => e.indexOf(dom + '.') === 0);
+    }
+    return [s];
+  }
+
   /* 情景在本页里直接下发，不调用任何外部脚本实体 */
   function applyScene(id) {
     const sc = LH.scenes.find((s) => s.id === id);
@@ -2355,14 +2433,20 @@
     }
     const acts = sc.actions || [];
     if (!acts.length) { toast(sc.name + ' · 没有可下发的动作'); return; }
+    let n = 0;
     acts.forEach((x) => {
-      const dom = x.entity.split('.')[0];
-      const data = { entity_id: x.entity };
-      if (x.temperature != null) data.temperature = x.temperature;
-      if (x.hvac_mode) data.hvac_mode = x.hvac_mode;
-      callService(dom, x.service || 'turn_on', data);
+      expandSceneTarget(x.entity).forEach((ent) => {
+        const dom = ent.split('.')[0];
+        const data = { entity_id: ent };
+        if (x.temperature != null) data.temperature = x.temperature;
+        if (x.hvac_mode) data.hvac_mode = x.hvac_mode;
+        if (x.brightness_pct != null) data.brightness_pct = x.brightness_pct;
+        callService(dom, x.service || 'turn_on', data);
+        n++;
+      });
     });
-    toast('已下发 · ' + sc.name + '（' + acts.length + ' 项）');
+    if (!n) { toast(sc.name + ' · 没找到可下发的实体（先在 HA 里接设备）'); return; }
+    toast('已下发 · ' + sc.name + '（' + n + ' 项）');
     setTimeout(() => { paintMarkers(); paintGlow(); refreshRoom(); }, 1600);
   }
 
@@ -7346,6 +7430,7 @@
       if (cfg) {
         if (applyCfg(cfg)) {
           localCfgWrite(cfg);
+          if (window.LH.__sceneSeed) remoteCfgSave(cfg);   // 补了默认情景 → 写回服务器
           if (state.booted) rerenderAll();
         }
       } else {
@@ -7408,7 +7493,10 @@
     //   随后 syncFromServer() 用 HA 服务器上的配置覆盖并重绘
     try {
       const cached = localCfgRead();
-      if (cached) applyCfg(cached);
+      if (cached) {
+        applyCfg(cached);
+        if (window.LH.__sceneSeed) localCfgWrite(cached);
+      }
     } catch (e) { console.warn('[QLovehome] 读取缓存配置失败', e); }
 
     buildPlan();
