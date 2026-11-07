@@ -2036,6 +2036,23 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .lh-ed-plan-canvas.panning { cursor: grabbing !important; }
 .lh-ed-plan-canvas.panning svg { cursor: grabbing !important; }
 .lh-ed-plan-canvas.placing { cursor: copy; }
+/* 放设备时整张图都显示"复制/放置"光标，别被房间/设备自己的 cursor 抢掉 */
+.lh-ed-plan-canvas.placing .lh-ed-plan-room,
+.lh-ed-plan-canvas.placing .lh-ed-plan-label,
+.lh-ed-plan-canvas.placing .lh-ed-plan-room-name,
+.lh-ed-plan-canvas.placing .lh-ed-plan-room-readout,
+.lh-ed-plan-canvas.placing .lh-ed-plan-dev { cursor: copy; }
+/* 按住空格 = 平移视图，所有子元素统一显示抓手 */
+.lh-ed-plan-canvas.space-pan .lh-ed-plan-room,
+.lh-ed-plan-canvas.space-pan .lh-ed-plan-label,
+.lh-ed-plan-canvas.space-pan .lh-ed-plan-room-name,
+.lh-ed-plan-canvas.space-pan .lh-ed-plan-room-readout,
+.lh-ed-plan-canvas.space-pan .lh-ed-plan-dev { cursor: grab; }
+.lh-ed-plan-canvas.space-pan.panning .lh-ed-plan-room,
+.lh-ed-plan-canvas.space-pan.panning .lh-ed-plan-label,
+.lh-ed-plan-canvas.space-pan.panning .lh-ed-plan-room-name,
+.lh-ed-plan-canvas.space-pan.panning .lh-ed-plan-room-readout,
+.lh-ed-plan-canvas.space-pan.panning .lh-ed-plan-dev { cursor: grabbing; }
 .lh-ed-plan-canvas.drawing { cursor: crosshair; }
 .lh-ed-plan-svg {
   width: 100%; height: 100%; max-height: 100%; cursor: crosshair;

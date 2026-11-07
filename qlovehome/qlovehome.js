@@ -59,6 +59,81 @@
       localStorage.removeItem(OLD_CFG_KEY);
     } catch (e) { /* 无痕模式忽略 */ }
   }
+  /* 主实体的挑选顺序：越靠前越能代表整台设备。
+     Midea 这类集成一台空调会同时给出 climate / switch / select / 一堆 sensor，
+     用户批量导入或随手点了某个实体时，主实体经常落到开关或传感器上，
+     面板就变成插座 / 只读详情。这里按设备实际拥有的实体重新挑一次。 */
+  const PRIMARY_DOMAINS = ['climate', 'camera', 'water_heater', 'light', 'cover', 'fan',
+    'media_player', 'vacuum', 'humidifier', 'valve', 'switch', 'lock', 'select',
+    'button', 'number', 'time', 'sensor', 'binary_sensor'];
+
+  /* 有自己整套面板的域：只要有这类实体，就该让它当主实体
+     （空调别被 *_power 开关占住，热水器别绑到水量传感器） */
+  const SPECIAL_DOMAINS = ['climate', 'water_heater', 'camera', 'cover', 'fan',
+    'media_player', 'vacuum', 'humidifier', 'valve'];
+  /* 已经能代表整机的域：选中它们就别再动，免得越修越乱 */
+  const CORE_DOMAINS = SPECIAL_DOMAINS.concat(['light', 'switch', 'lock']);
+  /* 辅助实体：指示灯 / 背光 / 童锁 / 提示音 / 屏幕…
+     米家开关几乎都会多带一颗 *_indicator_light，它跟着面板灯亮灭。
+     一旦被选成主实体，灯开着也显示「关」，点开关还会去动指示灯。 */
+  const AUX_ENTITY_RE = /indicator|指示灯|backlight|night_?light|nightlight|screen|display|led|buzzer|beep|child_?lock|童锁|提示音|屏幕|锁键|按键音|light_sensitive/i;
+
+  function domainRank(e) {
+    const i = PRIMARY_DOMAINS.indexOf(String(e || '').split('.')[0]);
+    return i < 0 ? 999 : i;
+  }
+
+  function primaryEntityOf(d) {
+    const pool = [];
+    if (d.entity) pool.push(d.entity);
+    (d.entities || []).forEach((e) => { if (e && pool.indexOf(e) < 0) pool.push(e); });
+    if (!pool.length) return '';
+    /* 1) 设备身上有专用域 → 取优先级最高的那个（climate 优先于 switch / select / sensor） */
+    const special = pool.filter((e) => !AUX_ENTITY_RE.test(e) &&
+      SPECIAL_DOMAINS.includes(String(e).split('.')[0]));
+    if (special.length) {
+      special.sort((a, b) => domainRank(a) - domainRank(b));
+      return special[0];
+    }
+    /* 2) 当前主实体已经是整机级的域 → 保持原样
+          （晾衣架的 cover 别被同设备的灯抢走，吸顶灯的 switch 别被指示灯抢走） */
+    const cur = d.entity || pool[0];
+    if (CORE_DOMAINS.includes(String(cur).split('.')[0])) return cur;
+    /* 3) 当前主实体只是读数 / 选项 / 按钮 → 按域优先级重挑，跳过辅助实体 */
+    let best = cur;
+    let bestRank = domainRank(cur);
+    pool.forEach((e) => {
+      if (AUX_ENTITY_RE.test(e)) return;
+      const rank = domainRank(e);
+      if (rank < bestRank) { best = e; bestRank = rank; }
+    });
+    return best;
+  }
+
+  /* 启动时自动校正设备：
+     1) 主实体按域优先级重选（空调别绑到开关、热水器别绑到水量传感器）
+     2) 名字是洗衣机 → 用洗衣机图标
+     3) 丢掉旧版本生成的 ctl（模板绑错过实体），下次打开按当前模板重新生成 */
+  function repairDevices() {
+    const devs = (window.LH && window.LH.devices) || [];
+    devs.forEach((d) => {
+      if (!d || !d.entity) return;
+      const best = primaryEntityOf(d);
+      if (best && best !== d.entity) d.entity = best;
+      if (/洗衣机|洗烘一体|洗烘|washer|washing_machine|laundry/i.test(String(d.name || ''))) {
+        d.kind = 'washer';
+      } else if (!d.kind || d.kind === 'sensor' || d.kind === 'appliance') {
+        const km = { climate: 'ac', water_heater: 'heater', light: 'light', cover: 'cover',
+          fan: 'fan', media_player: 'media', vacuum: 'vacuum', humidifier: 'humidifier',
+          lock: 'lock', camera: 'cam' };
+        const k = km[String(d.entity).split('.')[0]];
+        if (k) d.kind = k;
+      }
+      if (d.ctl) delete d.ctl;
+    });
+  }
+  window.LH_REPAIR_DEVICES = repairDevices;
+
   /* 把配置对象覆盖到 window.LH（返回覆盖到的段数） */
   function applyCfg(cfg) {
     if (!cfg || typeof cfg !== 'object') return 0;
@@ -73,6 +148,7 @@
     if (!window.LH.plan || typeof window.LH.plan !== 'object') window.LH.plan = {};
     if (!window.LH.plan.w) window.LH.plan.w = 620;
     if (!window.LH.plan.h) window.LH.plan.h = 692;
+    repairDevices();
     return n;
   }
 
@@ -722,6 +798,16 @@
     fresh: '新风', smart: '智能',
     speed_low: '低速', speed_medium: '中速', speed_high: '高速',
     heating_low: '加热低档', heating_high: '加热高档', '加热低挡': '加热低档', '加热高挡': '加热高档',
+    /* 洗衣机程序 / 状态（美的等集成上报英文枚举） */
+    cotton: '棉麻', daily: '日常', quick: '快洗', mixed: '混合', wool: '羊毛',
+    silk: '真丝', jeans: '牛仔', baby_care: '婴儿护衣', baby: '婴儿', sport: '运动',
+    sports: '运动', down_jacket: '羽绒服', shirt: '衬衫', underwear: '内衣', towel: '毛巾',
+    rinse_spin: '漂洗+脱水', spin_only: '单脱水', spin: '单脱水', powerful: '强力洗',
+    standard: '标准', delicate: '轻柔', hand_wash: '手洗', drum_clean: '筒清洁',
+    air_wash: '空气洗', wash: '洗涤', rinse: '漂洗', dehydration: '脱水',
+    running: '运行中', paused: '暂停', end: '已结束', finished: '已完成',
+    door_open: '门未关', door_closed: '门已关', no_wind_sense: '无风感',
+    none: '无', light: '轻度', heavy: '重度',
   };
   /* 各家集成给的值大小写不统一：米家/浴霸全小写，美的 midea_ac_lan 是首字母大写
      （Silent / Low / Medium / High / Full / Off），直接查表会全部落空、按钮变英文。
@@ -869,12 +955,16 @@
     if (!s) return false;
     const dom = (ent || '').split('.')[0];
     if (dom === 'climate') return !['off', 'unavailable', 'unknown'].includes(s.state);
+    if (dom === 'water_heater') return !['off', 'unavailable', 'unknown'].includes(s.state);
     if (dom === 'cover') return s.state !== 'closed' && s.state !== 'unavailable';
     if (dom === 'media_player') return ['playing', 'paused', 'on', 'idle'].includes(s.state);
     return ON_STATES.includes(s.state) || s.state === 'unlocked';
   }
   function isOnReal(d) {
-    /* 面板 / 门铃 / 门锁这类复合设备是"在线可操作"，不该按开关态画成灰的 */
+    /* 复合面板优先看真正的电源实体：以前一刀切 always → 所有复合设备都常亮，
+       洗衣机 / 热水器 / 空调明明关着也显示成"开" */
+    if (d.ctl && d.ctl._powerEid) return isOnEntity(d.ctl._powerEid);
+    /* 没有电源实体的中控 / 门铃 / 门锁这类面板，才算"在线可操作"常亮 */
     if (d.ctl && d.ctl.always) return true;
     const dom = d.entity.split('.')[0];
     /* 相机主实体掉了就看看备用源：相机明明在录像，别算成"关着" */
@@ -884,9 +974,13 @@
     }
     const s = st(d.entity);
     if (!s) return false;
-    if (dom === 'climate') return !['off', 'unavailable', 'unknown'].includes(s.state);    if (dom === 'cover') return s.state !== 'closed' && s.state !== 'unavailable';
+    if (dom === 'climate' || dom === 'water_heater') {
+      return !['off', 'unavailable', 'unknown'].includes(s.state);
+    }
+    if (dom === 'cover') return s.state !== 'closed' && s.state !== 'unavailable';
     if (dom === 'media_player') return ['playing', 'paused', 'on', 'idle'].includes(s.state);
-    return s.state === 'on' || s.state === 'open';
+    if (dom === 'vacuum') return ['cleaning', 'returning', 'on'].includes(s.state);
+    return s.state === 'on' || s.state === 'open' || s.state === 'unlocked';
   }
   /* 开关态：乐观值优先（刚点过、设备还没回报），其余一律读真实状态。
      每个表面（房间面板 / 常驻栏 / 弹窗 / 户型图）都走这一个判据，不会出现"某个地方还亮着"。 */
@@ -1096,7 +1190,7 @@
     // 基础
     light: 'i-bulb', ac: 'i-snow', heat: 'i-heat', fresh: 'i-wind', fan: 'i-fan',
     plug: 'i-plug', media: 'i-media', cover: 'i-cover', lock: 'i-lock',
-    cam: 'i-cam', toilet: 'i-toilet', appliance: 'i-washer', hub: 'i-hub', sensor: 'i-wave',
+    cam: 'i-cam', toilet: 'i-toilet', appliance: 'i-washer', washer: 'i-washer', hub: 'i-hub', sensor: 'i-wave',
     heater: 'i-tap', cook: 'i-pot', flame: 'i-flame',
     panel: 'i-panel', bell: 'i-bell',
     // 清洁
@@ -2730,28 +2824,75 @@
       ].filter((g) => g.items.length)
     }),
 
-    /* ✅ 洗衣机（参考米家洗衣机 App 设计）*/
-    '洗衣机|wash|laundry': (d, eids) => ({
-      always: true, sub: '程序 · 状态 · 剩余时间', open: '设置', echo: [{ e: d.entity }],
-      groups: [
-        { t: '程序控制', items: [
-          { k: 'sw', label: '通断', e: eids.find((e) => e.startsWith('switch')) || d.entity },
-          { k: 'seg', label: '程序选择', e: eids.find((e) => /program|mode/i.test(e)) || d.entity },
-          { k: 'btn', label: '开始', e: d.entity, svc: 'turn_on', text: '▶ 开始', dom: 'switch' },
-          { k: 'btn', label: '暂停', e: eids.find((e) => /pause/i.test(e)) || '', svc: 'turn_off', text: '⏸ 暂停', dom: 'switch' },
-        ].filter((x) => x.e) },
-        { t: '参数', items: [
-          { k: 'seg', label: '温度', e: eids.find((e) => /temp/i.test(e)) || '' },
-          { k: 'seg', label: '转速', e: eids.find((e) => /spin|speed/i.test(e)) || '' },
-          { k: 'seg', label: '用水量', e: eids.find((e) => /water|level/i.test(e)) || '' },
-        ].filter((x) => x.e) },
-        { t: '状态', items: [
-          { k: 'ro', label: '剩余时间', e: eids.find((e) => /remaining|time_left/i.test(e)) || '', unit: ' 分钟' },
-          { k: 'ro', label: '运行状态', e: eids.find((e) => /status|state/i.test(e)) || '', unit: '' },
-          { k: 'ro', label: '故障代码', e: eids.find((e) => /fault|error/i.test(e)) || '', unit: '' },
-        ].filter((x) => x.e) },
-      ].filter((g) => g.items.length)
-    }),
+    /* ✅ 洗衣机（按设备实际实体拼，不写死米家/美的的命名）*/
+    '洗衣机|wash|laundry': (d, eids) => {
+      const pick = (re, dom) => eids.find((e) => (!dom || e.indexOf(dom + '.') === 0) && re.test(e)) || '';
+      const power = pick(/power|on_off/i, 'switch') || (d.entity.indexOf('switch.') === 0 ? d.entity : '');
+      const start = pick(/control|start|pause|run|work/i, 'switch');
+      const program = pick(/program/i, 'select');
+      const mode = pick(/mode/i, 'select');
+      const temp = pick(/temperature|temp/i, 'select') || pick(/temperature|temp/i, 'number');
+      const spin = pick(/spin|dehydrat|speed/i, 'select') || pick(/spin|dehydrat|speed/i, 'number');
+      const water = pick(/water.*level|water_level|level/i, 'select');
+      const detergent = pick(/detergent|softener/i, 'select');
+      const stains = pick(/stain/i, 'select');
+      const soak = pick(/soak/i, 'number') || pick(/soak/i, 'select');
+      const status = pick(/running_status|device_status|status|state/i, 'sensor');
+      const remain = pick(/remain|left|time.*left/i, 'sensor');
+      const progress = pick(/progress|percent/i, 'sensor');
+      const error = pick(/fault|error/i, 'sensor');
+      const door = pick(/door/i, 'binary_sensor');
+      const lack = pick(/lack|shortage|empty/i, 'binary_sensor');
+      const extraCn = [
+        [/night/i, '夜间洗'], [/wind|dispel/i, '风干'], [/memory/i, '记忆'],
+        [/down_light|light/i, '筒灯'], [/steril/i, '除菌'], [/child|lock/i, '童锁'],
+        [/dry/i, '烘干'], [/fresh/i, '新风'], [/dosing/i, '自动投放']
+      ];
+      const extra = eids.filter((e) => e.indexOf('switch.') === 0 && e !== power && e !== start &&
+        /night|wind|dispel|memory|light|steril|dry|fresh|child|lock|dosing/i.test(e));
+      const once = eids.filter((e) => /consumption_once|_once$|water_consumption|energy_consumption/i.test(e));
+      const labelOf = (e) => {
+        const f = ((st(e) || {}).attributes || {}).friendly_name;
+        if (f && !/^[a-z0-9_ .-]+$/i.test(f)) return f;
+        const hit = extraCn.find(([re]) => re.test(e));
+        return hit ? hit[1] : (f || e.split('.')[1].replace(/_/g, ' '));
+      };
+      const groups = [
+        { t: '洗衣控制', items: [
+          power ? { k: 'sw', label: '电源', e: power } : null,
+          start ? { k: 'sw', label: '启动 / 暂停', e: start } : null,
+        ] },
+        { t: '洗涤程序', items: [
+          program ? { k: 'seg', label: '程序', e: program } : null,
+          mode && mode !== program ? { k: 'seg', label: '模式', e: mode } : null,
+          temp ? { k: temp.indexOf('select.') === 0 ? 'seg' : 'num', label: '温度', e: temp,
+                   unit: temp.indexOf('select.') === 0 ? '' : '°C', min: 0, max: 95 } : null,
+          spin ? { k: spin.indexOf('select.') === 0 ? 'seg' : 'num', label: '转速', e: spin,
+                   unit: spin.indexOf('select.') === 0 ? '' : ' 转' } : null,
+          water ? { k: 'seg', label: '水位', e: water } : null,
+          detergent ? { k: 'seg', label: '洗涤剂', e: detergent } : null,
+          stains ? { k: 'seg', label: '污渍', e: stains } : null,
+          soak ? { k: soak.indexOf('select.') === 0 ? 'seg' : 'num', label: '浸泡', e: soak } : null,
+        ] },
+        { t: '运行状态', items: [
+          status ? { k: 'ro', label: '当前状态', e: status, unit: '' } : null,
+          remain ? { k: 'ro', label: '剩余时间', e: remain, unit: '' } : null,
+          progress ? { k: 'ro', label: '进度', e: progress, unit: ' %' } : null,
+          door ? { k: 'ro', label: '机门', e: door, unit: '' } : null,
+          lack ? { k: 'ro', label: '洗涤剂', e: lack, unit: '' } : null,
+          error ? { k: 'ro', label: '故障代码', e: error, unit: '' } : null,
+        ] },
+        { t: '附加功能', items: extra.map((e) => ({ k: 'sw', label: labelOf(e), e: e })) },
+        { t: '本次用量', items: once.map((e) => ({
+          k: 'ro',
+          label: /water/i.test(e) ? '本次用水' : '本次耗电',
+          e: e,
+          unit: /water/i.test(e) ? ' L' : ' kWh'
+        })) },
+      ].map((g) => ({ t: g.t, items: g.items.filter(Boolean) }))
+       .filter((g) => g.items.length);
+      return { always: true, sub: '程序 · 状态 · 剩余时间', open: '设置', echo: [{ e: power || d.entity }], groups };
+    },
     /* 旧饮水机/中控/热水器/马桶已在上面重写，这里只保留未重写的 */
     '插排|插座|plug|outlet|power_strip': (d, eids) => {
       const hasPower = eids.some((e) => /power|energy|kwh|current|voltage/i.test(e));
@@ -3084,12 +3225,17 @@
     const domText = [...domains].join(',');
 
     // 具体特征优先（检查顺序很重要：先特殊的再通用的）
+    // 有专用面板的域直接交给专用控件，别用模板把面板拼歪
+    if (domains.has('climate')) return null;
     if (domains.has('humidifier')) return '加湿|humidifier|dehumidifier|除湿';
     if (domains.has('vacuum')) return '扫地|vacuum|robot.*vac|roborock|dreame|ilife|xiaomi.*vac|sweeper|扫拖';
     if (domains.has('cover')) return '窗帘|幕布|遮阳|cover|curtain|blind|shade';
     if (domains.has('camera')) return '摄像头|camera|监控|webcam|doorbell|门铃';
     if (domains.has('water_heater')) return '热水器|water_heater';
-    if (domains.has('lock')) return '门锁|lock|smart_lock|door_lock|cadiz|kaadas|aqara.*lock|roci';
+    /* 只有 lock 的设备才是门锁；洗衣机/家电也常带 child_lock，别被它抢走 */
+    if (domains.has('lock') && !domains.has('switch') && !domains.has('select')) {
+      return '门锁|lock|smart_lock|door_lock|cadiz|kaadas|aqara.*lock|roci';
+    }
 
     // 中控面板：volume + mute/mic + display/screen + relay/channel/按键
     if (/volume|音量/.test(text)
@@ -3303,6 +3449,27 @@
     return out;
   }
 
+  /* 编辑器里选「加载项页面」时存的是 {type:'qlh-addon', addon:slug}，
+     打开前再向 HA 取一次 ingress 地址：令牌会随加载项重启变化，
+     写死在配置里过几天就打不开了。 */
+  function resolveCardConfig(card) {
+    if (!card || String(card.type || '') !== 'qlh-addon' || !card.addon) {
+      return Promise.resolve(card);
+    }
+    const slug = String(card.addon);
+    const h = hass();
+    if (h && typeof h.callWS === 'function') {
+      return h.callWS({ type: 'supervisor/ingress/info', slug: slug })
+        .then((info) => {
+          const url = info && info.ingress_url;
+          if (!url) throw new Error('没有 ingress 地址');
+          return { type: 'iframe', url: url, aspect_ratio: '75%' };
+        })
+        .catch(() => ({ type: 'iframe', url: '/' + slug, aspect_ratio: '75%' }));
+    }
+    return Promise.resolve({ type: 'iframe', url: '/' + slug, aspect_ratio: '75%' });
+  }
+
   function makeHassCard(card) {
     const host = hassCardHost();
     if (!host) return Promise.reject(new Error('不在 Home Assistant 页面中'));
@@ -3326,7 +3493,6 @@
   }
 
   function openCardOverlay(title, sub, card, onNative) {
-    card = normalizeCardConfig(card);
     const host = hassCardHost();
     const h = hass();
     if (!host || !h) { toast('自定义面板需在 Home Assistant 中打开'); return; }
@@ -3404,25 +3570,39 @@
     closeBtn.addEventListener('click', close);
     if (onNative) nativeBtn.addEventListener('click', () => { close(); onNative(); });
 
-    makeHassCard(card).then((el3) => {
-      if (closed) return;
-      el3.hass = h;
-      body.append(el3);
-      /* hass 对象每次状态变化都会换新，持续赋值让卡片跟着实时刷新 */
-      timer = setInterval(() => {
+    const loading = doc.createElement('div');
+    loading.style.cssText =
+      'padding:24px 8px;font-size:13px;color:var(--secondary-text-color,#727272);';
+    loading.textContent = '正在加载面板…';
+    body.append(loading);
+
+    resolveCardConfig(card)
+      .then((cfg) => makeHassCard(normalizeCardConfig(cfg)))
+      .then((el3) => {
         if (closed) return;
-        const nh = hass();
-        if (nh) el3.hass = nh;
-      }, 1000);
-    }).catch((err) => {
-      const msg = doc.createElement('div');
-      msg.style.cssText =
-        'padding:24px 8px;line-height:1.9;font-size:13px;color:var(--error-color,#d9534f);';
-      msg.textContent = '自定义卡片「' + ((card && card.type) || '?') + '」未加载：' +
-        ((err && err.message) || err) +
-        '。请确认对应集成已启用，或在 HA 仪表盘资源中添加该卡片 JS。';
-      body.append(msg);
-    });
+        loading.remove();
+        el3.hass = h;
+        body.append(el3);
+        /* hass 对象每次状态变化都会换新，持续赋值让卡片跟着实时刷新 */
+        timer = setInterval(() => {
+          if (closed) return;
+          const nh = hass();
+          if (nh) el3.hass = nh;
+        }, 1000);
+      })
+      .catch((err) => {
+        if (closed) return;
+        loading.remove();
+        const msg = doc.createElement('div');
+        msg.style.cssText =
+          'padding:24px 8px;line-height:1.9;font-size:13px;color:var(--error-color,#d9534f);';
+        const what = card && card.type === 'qlh-addon'
+          ? '加载项「' + card.addon + '」页面'
+          : '卡片「' + ((card && card.type) || '?') + '」';
+        msg.textContent = what + '未加载：' + ((err && err.message) || err) +
+          '。请确认对应集成 / 加载项已启用，或在 HA 仪表盘资源中添加该卡片 JS。';
+        body.append(msg);
+      });
   }
 
   function openControl(d, forceNative) {

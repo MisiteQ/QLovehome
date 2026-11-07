@@ -151,38 +151,178 @@
     return v;
   }
 
-  function bindCardEditor(form, key, presetDeviceId) {
-    const ta = $('#' + key + 'Yaml', form);
-    if (!ta) return;
-    $$('[data-card-preset]', form).forEach((btn) => {
-      btn.onclick = () => {
-        const p = btn.getAttribute('data-card-preset');
-        if (p === 'qfnplus') {
-          ta.value = '# 直接展开完整设备面板（不要用 qfnplus-popup-card，它会多一层弹窗）\n' +
-            'type: custom:qfnplus-device-card\n' +
-            (presetDeviceId
-              ? 'device_id: ' + presetDeviceId + '\n'
-              : '# device_id: 从 HA「设备」页 URL 复制（可选）\n');
-        } else if (p === 'iframe') {
-          ta.value = 'type: iframe\nurl: /hassio/ingress/<addon-slug>\naspect_ratio: 75%\n';
-        }
-        ta.focus();
-      };
+  /* 面板来源：可视化选择，不用手写 YAML */
+  const CARD_SRC_NONE = 'none';
+  const CARD_SRC_QFN = 'qfnplus';
+  const CARD_SRC_ADDON = 'addon';
+  const CARD_SRC_CUSTOM = 'custom';
+
+  function cardSourceOf(card) {
+    if (!card || typeof card !== 'object' || !card.type) return CARD_SRC_NONE;
+    if (card.type === 'qlh-addon') return CARD_SRC_ADDON;
+    if (/^custom:qfnplus-(popup|device)-card$/.test(String(card.type))) return CARD_SRC_QFN;
+    return CARD_SRC_CUSTOM;
+  }
+
+  /* Q飞牛+ 主设备：设备注册表里 identifiers = ['qfnplus', entry_id]，
+     磁盘子设备的 entry_id 带 _disk_ 后缀，不是整机面板，排除掉。 */
+  let _qfnDevCache = null;
+  function qfnplusDevices() {
+    if (_qfnDevCache) return Promise.resolve(_qfnDevCache);
+    const h = haHass();
+    if (!h) return Promise.resolve([]);
+    const pick = (rows) => {
+      const out = rows.filter((d) => {
+        if (d.via_device_id) return false;
+        return (d.identifiers || []).some((pair) => Array.isArray(pair) &&
+          pair[0] === 'qfnplus' && String(pair[1] || '').indexOf('_disk_') < 0);
+      }).map((d) => ({
+        id: d.id,
+        name: d.name_by_user || d.name || d.model || d.id
+      }));
+      out.sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hans-CN'));
+      _qfnDevCache = out;
+      return out;
+    };
+    /* 优先用 hass.devices（前端已加载，普通用户也能读），没有再走 WS */
+    if (h.devices && Object.keys(h.devices).length) {
+      return Promise.resolve(pick(Object.keys(h.devices).map((id) =>
+        Object.assign({ id: id }, h.devices[id]))));
+    }
+    if (typeof h.callWS !== 'function') return Promise.resolve([]);
+    return h.callWS({ type: 'config/device_registry/list' })
+      .then((devs) => pick(devs || [])).catch(() => []);
+  }
+
+  /* 加载项：直接从 HA 侧边栏面板里找带 addon 配置的入口（不需要管理员） */
+  function addonCandidates() {
+    const h = haHass();
+    const panels = (h && h.panels) || {};
+    const seen = {};
+    const out = [];
+    Object.keys(panels).forEach((path) => {
+      const p = panels[path] || {};
+      const slug = (p.config && p.config.addon) || '';
+      if (!slug || seen[slug]) return;
+      seen[slug] = 1;
+      out.push({ slug: String(slug), name: p.title || String(slug) });
     });
+    out.sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hans-CN'));
+    return out;
+  }
+
+  function loadAddonCandidates() {
+    const direct = addonCandidates();
+    if (direct.length) return Promise.resolve(direct);
+    const h = haHass();
+    if (!h || typeof h.callWS !== 'function') return Promise.resolve([]);
+    return h.callWS({ type: 'supervisor/api', endpoint: '/addons', method: 'get' })
+      .then((res) => {
+        const list = (res && (res.addons || (res.data && res.data.addons))) || [];
+        return list.filter((a) => a && a.ingress === true)
+          .map((a) => ({ slug: a.slug, name: a.name || a.slug }));
+      }).catch(() => []);
+  }
+
+  function fillSelect(sel, list, want, emptyText) {
+    if (!sel) return;
+    if (!list.length) {
+      sel.innerHTML = '<option value="">' + esc(emptyText) + '</option>';
+      return;
+    }
+    let opts = '<option value="">— 请选择 —</option>' +
+      list.map((it) => `<option value="${esc(it.id || it.slug)}">${esc(it.name)}</option>`).join('');
+    if (want && !list.some((it) => (it.id || it.slug) === want)) {
+      opts = `<option value="${esc(want)}">${esc(want)}（当前配置）</option>` + opts;
+    }
+    sel.innerHTML = opts;
+    sel.value = want || (list.length === 1 ? (list[0].id || list[0].slug) : '');
+  }
+
+  function bindCardEditor(form, key, card) {
+    const src = $('#' + key + 'Source', form);
+    if (!src) return;
+    const ta = $('#' + key + 'Yaml', form);
+    const qfnSel = $('#' + key + 'Qfn', form);
+    const addonSel = $('#' + key + 'Addon', form);
+    const qfnWrap = $('#' + key + 'QfnWrap', form);
+    const addonWrap = $('#' + key + 'AddonWrap', form);
+    const yamlWrap = $('#' + key + 'YamlWrap', form);
+    const cur = card || null;
+
+    ta.value = cur && cur.type === 'qlh-addon' ? '' : cardToYaml(cur);
+
+    function sync() {
+      const v = src.value;
+      if (qfnWrap) qfnWrap.hidden = v !== CARD_SRC_QFN;
+      if (addonWrap) addonWrap.hidden = v !== CARD_SRC_ADDON;
+      if (yamlWrap) yamlWrap.hidden = v !== CARD_SRC_CUSTOM;
+    }
+    src.value = cardSourceOf(cur);
+    src.onchange = sync;
+    sync();
+
+    _qfnDevCache = null;
+    qfnplusDevices().then((list) => {
+      fillSelect(qfnSel, list, (cur && cur.device_id) || '',
+        '未发现 Q飞牛+ 设备（请先在 HA 安装并启用 Q飞牛+ 集成）');
+    });
+    loadAddonCandidates().then((list) => {
+      fillSelect(addonSel, list, (cur && cur.addon) || '',
+        '未发现带 Ingress 页面的加载项');
+    });
+  }
+
+  /* 读取「面板来源」下的可视化选择，返回卡片配置（null = 不使用） */
+  function readCardFromForm(form, key) {
+    const src = $('#' + key + 'Source', form);
+    const mode = src ? src.value : CARD_SRC_NONE;
+    if (mode === CARD_SRC_QFN) {
+      const did = ($('#' + key + 'Qfn', form) || {}).value || '';
+      if (!did) throw new Error('请选择一台 Q飞牛+ 设备');
+      return { type: 'custom:qfnplus-device-card', device_id: did };
+    }
+    if (mode === CARD_SRC_ADDON) {
+      const slug = ($('#' + key + 'Addon', form) || {}).value || '';
+      if (!slug) throw new Error('请选择一个加载项');
+      return { type: 'qlh-addon', addon: slug };
+    }
+    if (mode === CARD_SRC_CUSTOM) {
+      return parseCardYaml(($('#' + key + 'Yaml', form) || {}).value || '');
+    }
+    return null;
   }
 
   function cardSectionHtml(key, card, presetNote) {
     return `
       <hr style="border:none;border-top:1px dashed var(--bd2);margin:10px 0">
-      <label>自定义面板（可选 · Lovelace 卡片 YAML）
-        <textarea id="${key}Yaml" class="lh-yaml" spellcheck="false"
-          placeholder="type: custom:qfnplus-device-card&#10;device_id: xxxx">${esc(cardToYaml(card))}</textarea>
+      <label>自定义面板（可选）
+        <select id="${key}Source">
+          <option value="${CARD_SRC_NONE}">不使用 · QLovehome 原生面板</option>
+          <option value="${CARD_SRC_QFN}">Q飞牛+ 完整设备面板</option>
+          <option value="${CARD_SRC_ADDON}">加载项 / 集成页面</option>
+          <option value="${CARD_SRC_CUSTOM}">自定义 Lovelace 卡片（YAML · 高级）</option>
+        </select>
       </label>
-      <div class="lh-yaml-actions">
-        <button type="button" class="lh-ed-btn" data-card-preset="qfnplus">Q飞牛+ 完整面板</button>
-        <button type="button" class="lh-ed-btn" data-card-preset="iframe">加载项页面</button>
-        <span class="hint">${esc(presetNote || '留空 = 使用 QLovehome 原生面板；支持任意 Lovelace 卡片')}</span>
-      </div>`;
+      <div id="${key}QfnWrap" class="lh-card-sub" hidden>
+        <label>选择 Q飞牛+ 设备
+          <select id="${key}Qfn"><option value="">正在读取设备…</option></select>
+        </label>
+      </div>
+      <div id="${key}AddonWrap" class="lh-card-sub" hidden>
+        <label>选择加载项
+          <select id="${key}Addon"><option value="">正在读取加载项…</option></select>
+        </label>
+        <span class="hint">只列出侧边栏里有 Ingress 页面的加载项；打开时自动获取最新地址，不用自己填。</span>
+      </div>
+      <div id="${key}YamlWrap" class="lh-card-sub" hidden>
+        <label>Lovelace 卡片 YAML
+          <textarea id="${key}Yaml" class="lh-yaml" spellcheck="false"
+            placeholder="type: custom:qfnplus-device-card&#10;device_id: xxxx"></textarea>
+        </label>
+        <span class="hint">支持已加载的任意卡片；Q飞牛+ 请直接用上面的可视化选择。</span>
+      </div>
+      <span class="hint">${esc(presetNote || '留空 = 使用 QLovehome 原生面板')}</span>`;
   }
 
   /* 当前户型图 Tab 的「结束绘制」回调（全局只挂一个 mouseup 监听，切换 tab 时替换） */
@@ -207,6 +347,7 @@
     if (!window.LH.plan || typeof window.LH.plan !== 'object') window.LH.plan = {};
     if (!window.LH.plan.w) window.LH.plan.w = 620;
     if (!window.LH.plan.h) window.LH.plan.h = 692;
+    if (typeof window.LH_REPAIR_DEVICES === 'function') window.LH_REPAIR_DEVICES();
     return true;
   }
 
@@ -638,7 +779,8 @@
     canvas.appendChild(svg);
 
     /* ── 画布变换：空格拖动平移 + 滚轮缩放 ── */
-    let spaceHeld = false, panning = false;
+    let spaceHeld = false, panning = false, justPanned = false;
+    editState.plan.spaceHeld = false;
     /* 缩放/平移记在 editState 里：切 tab / 重绘后不再一夜回到 1:1 */
     const view = editState.plan.view || (editState.plan.view = { tx: 0, ty: 0, scale: 1 });
     let cx = 0, cy = 0, tx = view.tx, ty = view.ty, scale = view.scale;
@@ -655,29 +797,42 @@
       if (e.code === 'Space' && !isInputFocused() && editorRoot.classList.contains('open')) {
         e.preventDefault();
         spaceHeld = true;
+        editState.plan.spaceHeld = true;
+        canvas.classList.add('space-pan');
       }
     });
     document.addEventListener('keyup', (e) => {
       if (e.code === 'Space') {
         spaceHeld = false;
+        editState.plan.spaceHeld = false;
+        canvas.classList.remove('space-pan');
         if (panning) { panning = false; canvas.classList.remove('panning'); }
       }
       if (e.code === 'Key0' && (e.ctrlKey || e.metaKey)) { resetTransform(); }
     });
+    /* 捕获阶段拦下 pointerdown：按住空格时不管点到房间、设备还是标签，
+       都只平移视图，绝不让下面的拖拽逻辑接手 */
     canvas.addEventListener('pointerdown', (e) => {
       if (!spaceHeld || e.button !== 0) return;
       e.preventDefault(); e.stopPropagation();
-      panning = true; canvas.classList.add('panning');
+      panning = true; justPanned = false;
+      canvas.classList.add('panning');
       cx = e.clientX; cy = e.clientY;
-    });
+    }, true);
     document.addEventListener('pointermove', (e) => {
       if (!panning) return;
-      tx += e.clientX - cx; ty += e.clientY - cy;
+      const dx = e.clientX - cx, dy = e.clientY - cy;
+      if (Math.abs(dx) + Math.abs(dy) > 2) justPanned = true;
+      tx += dx; ty += dy;
       cx = e.clientX; cy = e.clientY;
       applyTransform();
     });
     document.addEventListener('pointerup', () => {
-      if (panning) { panning = false; canvas.classList.remove('panning'); }
+      if (panning) {
+        panning = false;
+        canvas.classList.remove('panning');
+        if (justPanned) setTimeout(() => { justPanned = false; }, 0);
+      }
     });
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -756,6 +911,8 @@
 
     /* ── 画布交互 ── */
     svg.addEventListener('click', (e) => {
+      /* 平移视图时松手可能带出一次 click，别把房间/设备选中或放置了 */
+      if (spaceHeld || justPanned) return;
       // 模式一：图上添加设备
       if (editState.plan.placeDev) {
         editState.plan.placeDev = false;
@@ -1371,6 +1528,8 @@
       poly.setAttribute('class', 'lh-ed-plan-room');
       poly.dataset.roomId = r.id;
       poly.addEventListener('click', (e) => {
+        if (editState.plan.placeDev || editState.plan.spaceHeld ||
+            editState.plan.drawMode || editState.plan.newRoomPts != null) return;
         if (poly._skipClick) { poly._skipClick = false; return; }
         selectRoom(r.id, e.ctrlKey || e.metaKey || e.shiftKey);
       });
@@ -1406,7 +1565,11 @@
         sub.textContent = readout.join(' · ');
         g.appendChild(sub);
       }
-      g.addEventListener('click', (e) => { e.stopPropagation(); selectRoom(r.id, e.ctrlKey || e.metaKey || e.shiftKey); });
+      g.addEventListener('click', (e) => {
+        if (editState.plan.placeDev || editState.plan.spaceHeld ||
+            editState.plan.drawMode || editState.plan.newRoomPts != null) return;
+        e.stopPropagation(); selectRoom(r.id, e.ctrlKey || e.metaKey || e.shiftKey);
+      });
       g.addEventListener('dblclick', (e) => { e.stopPropagation(); openRoomEditor(r.id); });
       g.addEventListener('pointerdown', (e) => startDragRoomLabel(e, r.id));
       svg.appendChild(g);
@@ -1419,7 +1582,11 @@
       g.dataset.devId = d.id;
       g.innerHTML = `<circle r="10" class="dot"></circle><text y="24" text-anchor="middle">${d.name}</text>`;
       g.addEventListener('pointerdown', (e) => startDragDevice(e, d));
-      g.addEventListener('click', (e) => { e.stopPropagation(); selectDevice(d.id, e.ctrlKey || e.metaKey || e.shiftKey); });
+      g.addEventListener('click', (e) => {
+        if (editState.plan.placeDev || editState.plan.spaceHeld ||
+            editState.plan.drawMode || editState.plan.newRoomPts != null) return;
+        e.stopPropagation(); selectDevice(d.id, e.ctrlKey || e.metaKey || e.shiftKey);
+      });
       svg.appendChild(g);
     });
 
@@ -1449,6 +1616,7 @@
   /* 房间整体拖动：按住房间内部拖动 → 多边形 + 名称标签 + 房里的设备一起平移 */
   function startDragRoomBody(e, roomId) {
     if (e.button !== 0) return;
+    if (editState.plan.spaceHeld) return;   // 空格 = 平移视图，不拖房间
     /* 绘制 / 放设备模式下不拖房间，让画布自己处理 */
     if (editState.plan.drawMode || editState.plan.newRoomPts != null || editState.plan.placeDev) return;
     const poly = e.currentTarget;
@@ -1512,6 +1680,8 @@
 
   /* 房间名标签拖动：松手后把 lx/ly 存回房间 */
   function startDragRoomLabel(e, roomId) {
+    if (editState.plan.spaceHeld) return;   // 空格 = 平移视图
+    if (editState.plan.placeDev || editState.plan.drawMode || editState.plan.newRoomPts != null) return;
     e.preventDefault();
     const svg = e.currentTarget.ownerSVGElement;
     const r = window.LH.rooms.find((x) => x.id === roomId);
@@ -1614,8 +1784,9 @@
 
   /* ── 设备拖动 ─────────────────────────────────────── */
   function startDragDevice(e, d) {
-    // 画房间/放设备模式下不拖设备
-    if (editState.plan.placeDev || editState.plan.drawMode) return;
+    if (editState.plan.spaceHeld) return;   // 空格 = 平移视图，不拖设备
+    // 画房间/放设备/画多边形模式下不拖设备
+    if (editState.plan.placeDev || editState.plan.drawMode || editState.plan.newRoomPts != null) return;
     e.preventDefault();
     const g = e.currentTarget;
     const svgEl = g.ownerSVGElement;
@@ -2531,7 +2702,7 @@
     // 基础
     ['light', '灯'], ['ac', '空调'], ['heat', '地暖'], ['fresh', '新风'], ['fan', '风扇'],
     ['plug', '插座'], ['cover', '窗帘'], ['lock', '门锁'], ['cam', '摄像头'], ['toilet', '智能马桶'],
-    ['appliance', '家电'], ['heater', '热水器'], ['cook', '烹饪'], ['flame', '燃气'],
+    ['appliance', '家电'], ['washer', '洗衣机'], ['heater', '热水器'], ['cook', '烹饪'], ['flame', '燃气'],
     ['media', '影音'], ['hub', '网关'], ['sensor', '传感器'], ['panel', '面板'], ['bell', '门铃'],
     // 清洁
     ['vacuum', '扫地机'], ['purifier', '空气净化器'], ['humidifier', '加湿器'], ['leak', '水浸传感器'],
@@ -2548,7 +2719,7 @@
     // 基础
     light: 'i-bulb', ac: 'i-snow', heat: 'i-heat', fresh: 'i-wind', fan: 'i-fan',
     plug: 'i-plug', cover: 'i-cover', lock: 'i-lock', cam: 'i-cam', toilet: 'i-toilet',
-    appliance: 'i-washer', heater: 'i-tap', cook: 'i-pot', flame: 'i-flame',
+    appliance: 'i-washer', washer: 'i-washer', heater: 'i-tap', cook: 'i-pot', flame: 'i-flame',
     media: 'i-media', hub: 'i-hub', sensor: 'i-wave', panel: 'i-panel', bell: 'i-bell',
     // 清洁
     vacuum: 'i-vacuum', purifier: 'i-purifier', humidifier: 'i-humidifier', leak: 'i-leak',
@@ -2567,6 +2738,7 @@
     light: ['light'], ac: ['climate'], heat: ['climate', 'switch'], fresh: ['fan', 'switch'],
     fan: ['fan'], plug: ['switch'], cover: ['cover'], lock: ['lock'], cam: ['camera'],
     toilet: ['switch', 'sensor', 'select'], appliance: ['switch', 'sensor', 'media_player'],
+    washer: ['switch', 'select', 'sensor', 'binary_sensor'],
     heater: ['water_heater', 'climate', 'switch'], cook: ['switch'], flame: ['binary_sensor', 'sensor'],
     media: ['media_player'], hub: ['switch', 'binary_sensor'], sensor: ['sensor', 'binary_sensor'],
     panel: ['switch'], bell: ['binary_sensor'],
@@ -2739,7 +2911,7 @@
       }
     };
     const entPicker = createEntityPicker($('#dEntity', form), pickerOpts);
-    bindCardEditor(form, 'dCard', d.device_id || '');
+    bindCardEditor(form, 'dCard', d.card);
 
     // 类型九宫格点选
     $('#dKindRow', form).addEventListener('click', (e) => {
@@ -2821,12 +2993,11 @@
       }
       if (!d.entity && !confirm('这台设备没有绑定 HA 实体，页面上不会显示实时状态，只能当装饰图标。\n仍要保存吗？')) return;
 
-      const ytxt = ($('#dCardYaml', form).value || '').trim();
-      if (ytxt) {
-        try { d.card = parseCardYaml(ytxt); }
-        catch (e) { toastHint('自定义面板 YAML 解析失败：' + e.message, 2800); return; }
-      } else {
-        delete d.card;
+      try {
+        const panel = readCardFromForm(form, 'dCard');
+        if (panel) d.card = panel; else delete d.card;
+      } catch (e) {
+        toastHint('自定义面板设置有误：' + e.message, 2800); return;
       }
 
       if (isNew) window.LH.devices.push(d);
@@ -2921,7 +3092,7 @@
 
     createEntityPicker($('#rTemp', form), { domains: ['sensor', 'climate'], placeholder: '温度传感器' });
     createEntityPicker($('#rHum', form), { domains: ['sensor', 'climate'], placeholder: '湿度传感器' });
-    bindCardEditor(form, 'rCard', '');
+    bindCardEditor(form, 'rCard', r.card);
 
     devDialog.classList.add('open');
     $('#lhEdDevSave', devDialog).onclick = () => {
@@ -2938,12 +3109,11 @@
       const bad = [r.temp, r.hum].filter((e) => e && states && !states[e]);
       if (bad.length && !confirm('这些实体在 HA 中不存在：\n' + bad.join('\n') + '\n\n仍要保存吗？')) return;
 
-      const ytxt = ($('#rCardYaml', form).value || '').trim();
-      if (ytxt) {
-        try { r.card = parseCardYaml(ytxt); }
-        catch (e) { toastHint('自定义面板 YAML 解析失败：' + e.message, 2800); return; }
-      } else {
-        delete r.card;
+      try {
+        const panel = readCardFromForm(form, 'rCard');
+        if (panel) r.card = panel; else delete r.card;
+      } catch (e) {
+        toastHint('自定义面板设置有误：' + e.message, 2800); return;
       }
 
       markDirty();

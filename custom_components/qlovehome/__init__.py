@@ -23,6 +23,7 @@ import json
 import logging
 import threading
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 import voluptuous as vol
@@ -533,8 +534,8 @@ async def _async_fire_timer(hass: HomeAssistant, entity_id: str, item: dict) -> 
 
     # 审计：定时到点自动触发
     await hass.async_add_executor_job(
-        _audit_write, "timer_fired",
-        entity_id=entity_id, act=act, name=name, fired=fired,
+        partial(_audit_write, "timer_fired",
+                entity_id=entity_id, act=act, name=name, fired=fired)
     )
 
 
@@ -652,9 +653,9 @@ async def ws_set_timer(hass, connection, msg):
     hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, **item})
     # 审计日志
     await hass.async_add_executor_job(
-        _audit_write, "timer_set",
-        entity_id=entity_id, act=item["act"], name=item["n"],
-        mins=round((item["end"] - int(datetime.now(timezone.utc).timestamp() * 1000)) / 60000),
+        partial(_audit_write, "timer_set",
+                entity_id=entity_id, act=item["act"], name=item["n"],
+                mins=round((item["end"] - int(datetime.now(timezone.utc).timestamp() * 1000)) / 60000))
     )
     connection.send_result(msg["id"], {"timers": timers})
 
@@ -676,12 +677,18 @@ async def ws_clear_timer(hass, connection, msg):
     _cancel_timer(hass, entity_id)
     hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, "act": None})
     await hass.async_add_executor_job(
-        _audit_write, "timer_clear", entity_id=entity_id,
+        partial(_audit_write, "timer_clear", entity_id=entity_id)
     )
     connection.send_result(msg["id"], {"timers": timers})
 
 
-@websocket_api.websocket_command({vol.Required("type"): WS_SERVICE_CALL})
+@websocket_api.websocket_command({
+    vol.Required("type"): WS_SERVICE_CALL,
+    vol.Required("domain"): str,
+    vol.Required("service"): str,
+    vol.Required("service_data"): dict,
+    vol.Optional("label"): str,
+})
 @websocket_api.async_response
 async def ws_service_call(hass, connection, msg):
     """设备操控（走后端，自动记审计日志）.
@@ -712,10 +719,10 @@ async def ws_service_call(hass, connection, msg):
     # 记审计日志
     try:
         await hass.async_add_executor_job(
-            _audit_write, "service_call",
-            entity_id=entity_id, domain=domain, service=service,
-            label=msg.get("label") or "",
-            data={k: v for k, v in service_data.items() if k != "entity_id"},
+            partial(_audit_write, "service_call",
+                    entity_id=entity_id, domain=domain, service=service,
+                    label=msg.get("label") or "",
+                    data={k: v for k, v in service_data.items() if k != "entity_id"})
         )
     except Exception:  # noqa: BLE001 - 审计写失败不影响主流程
         _LOGGER.exception("写审计日志失败")
@@ -830,9 +837,9 @@ class QlhTimerView(_QlhBaseView):
         _schedule_timer(self.hass, entity_id, item)
         self.hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, **item})
         await self.hass.async_add_executor_job(
-            _audit_write, "timer_set",
-            entity_id=entity_id, act=item["act"], name=item["n"],
-            mins=round((item["end"] - int(datetime.now(timezone.utc).timestamp() * 1000)) / 60000),
+            partial(_audit_write, "timer_set",
+                    entity_id=entity_id, act=item["act"], name=item["n"],
+                    mins=round((item["end"] - int(datetime.now(timezone.utc).timestamp() * 1000)) / 60000))
         )
         return self.json({"ok": True, "timers": timers})
 
@@ -850,7 +857,7 @@ class QlhTimerView(_QlhBaseView):
         _cancel_timer(self.hass, entity_id)
         self.hass.bus.async_fire(TIMER_EVENT, {"entity_id": entity_id, "act": None})
         await self.hass.async_add_executor_job(
-            _audit_write, "timer_clear", entity_id=entity_id,
+            partial(_audit_write, "timer_clear", entity_id=entity_id)
         )
         return self.json({"ok": True, "timers": timers})
 
@@ -895,10 +902,10 @@ class QlhServiceView(_QlhBaseView):
 
         try:
             await self.hass.async_add_executor_job(
-                _audit_write, "service_call",
-                entity_id=entity_id, domain=domain, service=service,
-                label=body.get("label") or "",
-                data={k: v for k, v in service_data.items() if k != "entity_id"},
+                partial(_audit_write, "service_call",
+                        entity_id=entity_id, domain=domain, service=service,
+                        label=body.get("label") or "",
+                        data={k: v for k, v in service_data.items() if k != "entity_id"})
             )
         except Exception:  # noqa: BLE001
             _LOGGER.exception("REST 审计写失败")
