@@ -74,6 +74,32 @@
 
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.prototype.slice.call((r || document).querySelectorAll(s));
+
+  /* 实体名 / 设备名太长时的自动滚动：给 .nm-scroll 里的文字包一层 inner span，
+     量出真实溢出宽度再启动 CSS 动画。只有真的放不下才动，短名字完全静止。
+     （HA 的 friendly_name 经常是「客厅小米智能多模网关子设备插座」这种，光省略号根本认不出是哪台） */
+  function setupNameScroll(root) {
+    const boxes = $$('.nm-scroll', root || document);
+    const jobs = [];
+    boxes.forEach((n) => {
+      let inner = n.querySelector('.nm-inner');
+      if (!inner) {
+        inner = el('span', 'nm-inner');
+        inner.textContent = n.textContent;
+        n.textContent = '';
+        n.appendChild(inner);
+      }
+      n.classList.remove('marquee');
+      const over = inner.scrollWidth - n.clientWidth;
+      if (over > 4) jobs.push([n, over]);
+    });
+    /* 先量完再写样式，避免逐个读写交替触发重排 */
+    jobs.forEach(([n, over]) => {
+      n.style.setProperty('--nm-shift', (-over - 2) + 'px');
+      n.style.setProperty('--nm-dur', Math.max(4, Math.round(over / 22)) + 's');
+      n.classList.add('marquee');
+    });
+  }
   /* 拼 HTML 前统一转义：实体 friendly_name / 房间名 / 设备名都可能含 < > " */
   const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -311,6 +337,7 @@
           '<button class="lh-ed-tab" data-tab="appliances" type="button">家电页</button>' +
           '<button class="lh-ed-tab" data-tab="overview" type="button">概览 · 家人 · 网关</button>' +
           '<button class="lh-ed-tab" data-tab="shell" type="button">侧栏 · 底栏</button>' +
+          '<button class="lh-ed-tab" data-tab="chrome" type="button">顶栏 · 右侧栏</button>' +
           '<button class="lh-ed-tab" data-tab="data" type="button">数据备份</button>' +
         '</nav>' +
         '<div class="lh-ed-body" id="lhEdBody"></div>' +
@@ -430,6 +457,7 @@
       case 'appliances': return buildAppliancesTab();
       case 'overview': return buildOverviewTab();
       case 'shell': return buildShellTab();
+      case 'chrome': return buildChromeTab();
       case 'data': return buildDataTab();
     }
     return el('div', 'lh-ed-empty');
@@ -1776,7 +1804,7 @@
     function itemHtml(e) {
       const stClass = e.state === 'on' ? 'on' : (e.state === 'unavailable' ? 'unavailable' : '');
       return `<div class="lh-ent-item" data-eid="${e.entity_id}">
-        <span class="lh-ent-name">${e.name}</span>
+        <span class="lh-ent-name nm-scroll">${e.name}</span>
         <code class="lh-ent-id">${e.entity_id}</code>
         <span class="lh-ent-state ${stClass}">${e.state}</span>
       </div>`;
@@ -1814,7 +1842,7 @@
       dropdown.innerHTML = html;
       dropdown.hidden = false;
       pickerOpen = true;
-      requestAnimationFrame(positionDropdown);
+      requestAnimationFrame(() => { positionDropdown(); setupNameScroll(dropdown); });
 
       dropdown.querySelectorAll('.lh-ent-item').forEach((it) => {
         it.addEventListener('pointerdown', (ev) => {
@@ -1855,6 +1883,11 @@
 
     // 事件：blur → 延迟关闭（等 mousedown 先触发）
     searchInp.addEventListener('blur', () => {
+      /* 值的同步必须「立刻」做：点「保存」时 blur 早于 click，
+         拖到 200ms 后再同步的话，保存读到的还是删除前的旧实体。
+         清空也要同步，否则删掉旧值不选新的，旧实体又会被恢复。 */
+      const v = searchInp.value.trim();
+      if (v !== hiddenInp.value) setValue(v);
       setTimeout(() => {
         // 如果用户点击了 dropdown 里的项，mousedown 先触发 setValue → 这里 dropdown 已经隐藏
         // 如果用户点了别处，也应该关闭
@@ -1862,9 +1895,6 @@
           dropdown.hidden = true;
           pickerOpen = false;
         }
-        // 如果用户直接输入了值，也接受
-        const v = searchInp.value.trim();
-        if (v && v !== hiddenInp.value) setValue(v);
       }, 200);
     });
 
@@ -1931,6 +1961,7 @@
 
     const list = $('#lhEdDevList', wrap);
     existing.forEach((d) => list.appendChild(buildDevRow(d)));
+    requestAnimationFrame(() => setupNameScroll(list));
 
     if (hasHA) $('#lhEdBulkImport', wrap).addEventListener('click', openBulkImport);
     $('#lhEdDevAdd', wrap).addEventListener('click', () => openDeviceEditor(null));
@@ -2136,7 +2167,7 @@
 
     // ★ 诊断信息——让用户一眼看到数据状态
     const diagWs = wsOk ? '✅ WS' : '⚠ 仅 states（有些设备可能读不全）';
-    const diagLine = `📡 数据来源：${diagWs} · 注册表 ${entityList.length} 实体 / ${deviceList.length} 台设备 · 共识别 <b>${devArr.length}</b> 台设备 · <b>${noDev.length}</b> 个散实体 · 已有 <b style="color:var(--amber-2)">${existingEntities.size}</b> 实体在面板中`;
+    const diagLine = `📡 数据来源：${diagWs} · 注册表 ${entityList.length} 实体 / ${deviceList.length} 台设备 · 共识别 <b>${devArr.length}</b> 台设备 · <b>${noDev.length}</b> 个散实体 · 已有 <b style="color:#a9762a">${existingEntities.size}</b> 实体在面板中`;
 
     // 构建弹窗 HTML —— ★ 简化版：只有设备级 checkbox + 展开看实体详情
     const dlg = el('div', 'lh-ed-dialog bulk-import');
@@ -2144,12 +2175,13 @@
       <div class="lh-ed-dialog-body" style="max-width:860px;max-height:85vh;display:flex;flex-direction:column">
         <div class="lh-ed-dialog-head"><b>🔍 从 Home Assistant 批量导入</b>
           <button class="lh-ed-dialog-close" type="button">×</button></div>
-        <div style="padding:6px 16px;color:var(--s3);font-size:12px;border-bottom:1px solid var(--bd2);background:var(--bg2,#f7f9fc)">
+        <div style="padding:6px 16px;color:#5b6472;font-size:12px;border-bottom:1px solid #e9ecf1;background:#f7f9fc">
           ${diagLine}
         </div>
-        <div style="padding:6px 12px;border-bottom:1px solid var(--bd2);display:flex;gap:12px;font-size:12px">
-          <input type="text" id="bulkSearch" placeholder="🔎 搜索设备名 / domain..." style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--bd2);background:var(--bg2, #f7f9fc);color:inherit">
+        <div style="padding:6px 12px;border-bottom:1px solid #e9ecf1;display:flex;gap:12px;font-size:12px">
+          <input type="text" id="bulkSearch" placeholder="🔎 搜索设备名 / domain..." style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid #d4d9e0;background:#fff;color:#1f2430">
           <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="bulkHideAlready"> 隐藏已全部接入</label>
+          <label style="display:flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" id="bulkSelAll"> 全选</label>
         </div>
         <div class="bulk-dev-list" id="bulkDevList" style="flex:1;overflow-y:auto;padding:8px">`;
 
@@ -2163,7 +2195,7 @@
         <div class="bulk-dev-head">
           <label class="bulk-dev-label">
             <input type="checkbox" class="bulk-dev-check" data-dev="${dev.key}" ${allAlready ? 'disabled' : ''}>
-            <b class="bulk-dev-name">📱 ${dev.name}</b>
+            <b class="bulk-dev-name nm-scroll">📱 ${dev.name}</b>
           </label>
           <span class="bulk-dev-meta">
             ${kind ? '<span class="bulk-dev-kind">' + kind + '</span>' : ''}
@@ -2176,7 +2208,7 @@
       dev.ents.forEach((e) => {
         const already = existingEntities.has(e.eid);
         html += `<div class="bulk-item${already ? ' already' : ''}">
-          <span class="bulk-name">${e.name}</span>
+          <span class="bulk-name nm-scroll">${e.name}</span>
           <code class="bulk-id">${e.eid}</code>
           <span class="bulk-state ${e.state === 'on' ? 'on' : (e.state === 'unavailable' ? 'unavailable' : '')}">${e.state}</span>
         </div>`;
@@ -2195,7 +2227,7 @@
         const already = existingEntities.has(e.eid);
         html += `<label class="bulk-item${already ? ' already' : ''}">
           <input type="checkbox" class="bulk-ent-check" data-eid="${e.eid}" ${already ? 'disabled' : ''}>
-          <span class="bulk-name">${e.name}</span>
+          <span class="bulk-name nm-scroll">${e.name}</span>
           <code class="bulk-id">${e.eid}</code>
           <span class="bulk-state">${e.state}</span>
         </label>`;
@@ -2212,6 +2244,8 @@
     </div>`;
     dlg.innerHTML = html;
     document.body.appendChild(dlg);
+    /* 弹窗刚插进 DOM 还没布局完，等一帧再量名字有没有溢出 */
+    requestAnimationFrame(() => setupNameScroll(dlg));
 
     const closeIt = () => dlg.remove();
     setTimeout(() => dlg.classList.add('open'), 10);
@@ -2227,6 +2261,8 @@
         const hidden = entsDiv.style.display === 'none';
         entsDiv.style.display = hidden ? '' : 'none';
         btn.textContent = hidden ? '▾' : '▸';
+        /* 折叠时元素宽度是 0，量不出溢出；展开后补量一次 */
+        if (hidden) requestAnimationFrame(() => setupNameScroll(entsDiv));
       });
     });
 
@@ -2243,6 +2279,7 @@
         const text = card.textContent.toLowerCase();
         card.style.display = text.includes(q) ? '' : 'none';
       });
+      syncSelAll();
     }
     let searchTimer = null;
     searchInp.addEventListener('input', () => {
@@ -2251,13 +2288,36 @@
     });
     hideAlready.addEventListener('change', applyFilter);
 
+    /* 全选：只作用于「当前筛出来、并且还能勾」的项（已接入的 disabled 不碰）；
+       部分勾选时表头显示半选态，手动勾/取消也会同步回来。 */
+    const selAll = dlg.querySelector('#bulkSelAll');
+    function selectableChecks() {
+      return Array.from(dlg.querySelectorAll('.bulk-dev-check, .bulk-ent-check')).filter((cb) => {
+        if (cb.disabled) return false;
+        const card = cb.closest('.bulk-dev-card');
+        return !card || card.style.display !== 'none';
+      });
+    }
+    function syncSelAll() {
+      const list = selectableChecks();
+      const on = list.filter((cb) => cb.checked).length;
+      selAll.disabled = !list.length;
+      selAll.checked = list.length > 0 && on === list.length;
+      selAll.indeterminate = on > 0 && on < list.length;
+    }
+    selAll.addEventListener('change', () => {
+      selectableChecks().forEach((cb) => { cb.checked = selAll.checked; });
+      refreshCount();
+      syncSelAll();
+    });
+
     function refreshCount() {
       const devCount = dlg.querySelectorAll('.bulk-dev-check:checked').length;
       const entCount = dlg.querySelectorAll('.bulk-ent-check:checked').length;
       dlg.querySelector('#bulkCount').textContent =
         devCount + ' 台设备' + (entCount ? ' + ' + entCount + ' 散实体' : '');
     }
-    dlg.addEventListener('change', refreshCount);
+    dlg.addEventListener('change', () => { refreshCount(); syncSelAll(); });
 
     dlg.querySelector('#bulkDo').onclick = () => {
       // ★ 简化：只收集设备级 checkbox + 散实体 checkbox
@@ -2345,7 +2405,7 @@
       stBadge = '<span class="lh-st off">离线</span>';
     else stBadge = '<span class="lh-st ok">' + esc(states[d.entity].state || '') + '</span>';
     row.innerHTML = `<div class="lh-ed-row-main">
-      <div class="lh-ed-row-title">${esc(d.name || '(无名称)')}</div>
+      <div class="lh-ed-row-title nm-scroll">${esc(d.name || '(无名称)')}</div>
       <div class="lh-ed-row-sub">
         kind: <b>${esc(d.kind || '—')}</b> · entity: <code>${esc(d.entity || '—')}</code>
         ${d.room ? ' · 房间: <b>' + esc(roomNameSafe(d.room)) + '</b>' : ''}
@@ -2994,6 +3054,298 @@
 
     renderStats();
     renderFilters();
+    return wrap;
+  }
+
+  /* ══════════════════════════════════════════════════════
+   * Tab: 顶栏 · 右侧栏（顶栏情景按钮 + 右列「常用设备 · 安防」）
+   * ══════════════════════════════════════════════════════ */
+  function buildChromeTab() {
+    const wrap = el('div', 'lh-ed-overview');
+    if (!Array.isArray(window.LH.scenes)) window.LH.scenes = [];
+    const scenes = window.LH.scenes;
+    const panel = window.LH.panel || (window.LH.panel = {});
+    if (!Array.isArray(panel.quick)) panel.quick = [];
+    if (!Array.isArray(panel.security)) panel.security = [];
+    const escq = (s) => String(s == null ? '' : s).replace(/"/g, '&quot;');
+    const allDevs = () => (window.LH.devices || []).filter((d) => d && d.name);
+    /* 可下发的服务：和 HA 的服务名一致，applyScene 里按 entity 的域调用 */
+    const SVC = [
+      ['turn_on', '打开 / 执行'], ['turn_off', '关闭'], ['toggle', '反转'],
+      ['open_cover', '打开窗帘'], ['close_cover', '关闭窗帘'],
+      ['lock', '上锁'], ['unlock', '解锁'],
+    ];
+    const SEC_KINDS = [
+      ['sensor', '数值 / 传感器'], ['binary_sensor', '门磁 / 门铃'], ['lock', '门锁'],
+      ['cam', '摄像头'], ['hub', '网关'], ['siren', '报警器'],
+    ];
+
+    wrap.innerHTML = `
+      <div class="lh-ed-section">
+        <h4>顶栏 · 情景按钮 <small class="lh-ed-hint">时钟右边那排；家人与天气在「概览 · 家人 · 网关」里设置</small></h4>
+        <div class="hint">按钮按这里的顺序排列，点一下依次下发下面配置的实体（直接填 HA 实体即可，不要求先在设备页登记）。</div>
+        <div id="scList" class="lh-ed-plist"></div>
+        <button class="lh-ed-btn" id="scAdd" type="button">+ 添加情景</button>
+      </div>
+      <div class="lh-ed-section">
+        <h4>右侧栏 · 常用设备 <small class="lh-ed-hint">没开房间面板时右列最上面那张卡</small></h4>
+        <div class="hint">按顺序显示，行尾一个开关直控；点整行打开完整控制面板。</div>
+        <div id="qkList" class="lh-ed-plist"></div>
+        <div class="lh-ed-prow">
+          <select id="qkPick"></select>
+          <button class="lh-ed-btn" id="qkAdd" type="button">+ 加入常用</button>
+        </div>
+      </div>
+      <div class="lh-ed-section">
+        <h4>右侧栏 · 安防网关 <small class="lh-ed-hint">网关在线状态 / 门锁 / 门铃 / 摄像头</small></h4>
+        <div class="hint">选「设备」可以点开控制；选「实体」只读显示状态（例如网关在线数）。</div>
+        <div id="secList" class="lh-ed-plist"></div>
+        <button class="lh-ed-btn" id="secAdd" type="button">+ 添加安防项</button>
+      </div>`;
+
+    function commit(live) {
+      markDirty();
+      if (live) document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
+    }
+
+    /* ── 顶栏情景 ── */
+    const expanded = new Set();
+    function fillActs(box, s) {
+      box.innerHTML = '';
+      const list = s.actions || (s.actions = []);
+      list.forEach((a, j) => {
+        const r = el('div', 'lh-ed-prow');
+        r.innerHTML =
+          `<select data-a="svc">${SVC.map(([v, l]) =>
+            `<option value="${v}"${v === (a.service || 'turn_on') ? ' selected' : ''}>${l}</option>`).join('')}</select>` +
+          `<input class="act-ent" value="${escq(a.entity || '')}" placeholder="实体 ID（如 light.living）">` +
+          '<button class="lh-ed-btn danger" data-adel type="button" title="删除动作">×</button>';
+        r.querySelector('[data-a="svc"]').onchange = (e) => {
+          a.service = e.target.value;
+          commit(true);
+        };
+        createEntityPicker(r.querySelector('.act-ent'), {
+          placeholder: '搜索实体…',
+          onChange: (v) => { a.entity = v; commit(false); },
+        });
+        r.querySelector('[data-adel]').onclick = () => {
+          list.splice(j, 1);
+          commit(true);
+          renderScenes();
+        };
+        box.append(r);
+      });
+      const add = el('button', 'lh-ed-btn', '+ 动作');
+      add.type = 'button';
+      add.style.alignSelf = 'flex-start';
+      add.onclick = () => {
+        list.push({ entity: '', service: 'turn_on' });
+        commit(true);
+        renderScenes();
+      };
+      box.append(add);
+    }
+
+    function renderScenes() {
+      const box = $('#scList', wrap);
+      if (!box) return;
+      /* 展开动作时会在 body 里挂一个实体下拉；重绘前先把旧的下拉收起，免得浮在页面上 */
+      $$('.lh-ent-dropdown').forEach((n) => { n.hidden = true; });
+      box.innerHTML = '';
+      if (!scenes.length) {
+        box.append(el('div', 'hint', '还没有情景按钮。点下面「+ 添加情景」建一个，比如「回家开灯」。'));
+      }
+      scenes.forEach((s, i) => {
+        const row = el('div', 'lh-ed-prow');
+        row.innerHTML =
+          `<select data-f="icon">${ICON_CHOICES.map(([k, l]) =>
+            `<option value="${k}"${k === (s.icon || 'i-bolt') ? ' selected' : ''}>${l}</option>`).join('')}</select>` +
+          `<input data-f="name" value="${escq(s.name)}" placeholder="情景名称（如：回家）">` +
+          `<input data-f="hint" value="${escq(s.hint || '')}" placeholder="悬停提示（可选）">` +
+          `<button class="lh-ed-btn" data-acts type="button">动作 ${(s.actions || []).length}</button>` +
+          '<button class="lh-ed-btn" data-mv="-1" type="button" title="上移">↑</button>' +
+          '<button class="lh-ed-btn" data-mv="1" type="button" title="下移">↓</button>' +
+          '<button class="lh-ed-btn danger" data-del="1" type="button" title="删除">×</button>';
+        row.querySelector('[data-f="icon"]').onchange = (e) => {
+          s.icon = e.target.value;
+          commit(true);
+        };
+        const nm = row.querySelector('[data-f="name"]');
+        nm.oninput = () => { s.name = nm.value; commit(false); };
+        nm.onchange = () => commit(true);
+        const hn = row.querySelector('[data-f="hint"]');
+        hn.oninput = () => { s.hint = hn.value; commit(false); };
+        hn.onchange = () => commit(true);
+        row.querySelector('[data-acts]').onclick = () => {
+          if (expanded.has(s.id)) expanded.delete(s.id);
+          else expanded.add(s.id);
+          renderScenes();
+        };
+        row.querySelectorAll('[data-mv]').forEach((b) => b.onclick = () => {
+          const j = i + Number(b.dataset.mv);
+          if (j < 0 || j >= scenes.length) return;
+          const t = scenes[i]; scenes[i] = scenes[j]; scenes[j] = t;
+          commit(true);
+          renderScenes();
+        });
+        row.querySelector('[data-del]').onclick = () => {
+          if (!confirm('删除情景「' + (s.name || s.id) + '」？')) return;
+          scenes.splice(i, 1);
+          expanded.delete(s.id);
+          commit(true);
+          renderScenes();
+        };
+        box.append(row);
+        if (expanded.has(s.id)) {
+          const sub = el('div', 'lh-ed-plist');
+          sub.style.margin = '0 0 8px 18px';
+          fillActs(sub, s);
+          box.append(sub);
+        }
+      });
+    }
+
+    /* ── 右侧栏：常用设备（存设备名，paintAlt 按名字找设备） ── */
+    function renderQuick() {
+      const box = $('#qkList', wrap);
+      const pick = $('#qkPick', wrap);
+      if (!box || !pick) return;
+      box.innerHTML = '';
+      if (!panel.quick.length) {
+        box.append(el('div', 'hint', '还没有常用设备。右下角选一台加进来（设备先在「设备」页添加）。'));
+      }
+      panel.quick.forEach((nm, i) => {
+        const d = allDevs().find((x) => x.name === nm);
+        const row = el('div', 'lh-ed-prow');
+        row.innerHTML =
+          `<span class="lh-ed-fixed" style="flex:0 0 34px">${i + 1}</span>` +
+          `<span style="flex:1;min-width:0;font-size:12.5px;color:${d ? '#1f2430' : '#a33a20'}">${esc(nm)}${d ? '' : '（设备不存在）'}</span>` +
+          `<span class="hint" style="flex:0 0 auto">${d ? esc(kindLabel(d.kind)) : ''}</span>` +
+          '<button class="lh-ed-btn" data-mv="-1" type="button" title="上移">↑</button>' +
+          '<button class="lh-ed-btn" data-mv="1" type="button" title="下移">↓</button>' +
+          '<button class="lh-ed-btn danger" data-del="1" type="button" title="移除">×</button>';
+        row.querySelectorAll('[data-mv]').forEach((b) => b.onclick = () => {
+          const j = i + Number(b.dataset.mv);
+          if (j < 0 || j >= panel.quick.length) return;
+          const t = panel.quick[i]; panel.quick[i] = panel.quick[j]; panel.quick[j] = t;
+          commit(true);
+          renderQuick();
+        });
+        row.querySelector('[data-del]').onclick = () => {
+          panel.quick.splice(i, 1);
+          commit(true);
+          renderQuick();
+        };
+        box.append(row);
+      });
+      const used = new Set(panel.quick);
+      const avail = allDevs().filter((d) => !used.has(d.name));
+      pick.innerHTML = avail.length
+        ? avail.map((d) => `<option value="${escq(d.name)}">${esc(d.name)}</option>`).join('')
+        : '<option value="">（设备都已在常用里）</option>';
+      pick.disabled = !avail.length;
+    }
+    $('#qkAdd', wrap).onclick = () => {
+      const v = $('#qkPick', wrap).value;
+      if (!v) return;
+      panel.quick.push(v);
+      commit(true);
+      renderQuick();
+    };
+
+    /* ── 右侧栏：安防项（设备 = 可控制；实体 = 只读状态） ── */
+    function renderSecurity() {
+      const box = $('#secList', wrap);
+      if (!box) return;
+      box.innerHTML = '';
+      if (!panel.security.length) {
+        box.append(el('div', 'hint', '还没有安防项。可添加网关在线状态（实体）或门锁 / 摄像头（设备）。'));
+      }
+      panel.security.forEach((it, i) => {
+        const isEnt = !!it.e;
+        const devOpts = allDevs().map((d) =>
+          `<option value="${escq(d.name)}"${d.name === it.n ? ' selected' : ''}>${esc(d.name)}</option>`).join('');
+        const row = el('div', 'lh-ed-prow');
+        row.innerHTML =
+          '<select data-t="type" style="flex:0 0 74px">' +
+            `<option value="dev"${isEnt ? '' : ' selected'}>设备</option>` +
+            `<option value="ent"${isEnt ? ' selected' : ''}>实体</option>` +
+          '</select>' +
+          (isEnt
+            ? `<input data-t="ent" value="${escq(it.e)}" placeholder="实体 ID">` +
+              `<input data-t="name" value="${escq(it.n || '')}" placeholder="显示名称">` +
+              `<select data-t="kind" style="flex:0 0 110px">${SEC_KINDS.map(([k, l]) =>
+                `<option value="${k}"${k === (it.k || 'sensor') ? ' selected' : ''}>${l}</option>`).join('')}</select>`
+            : `<select data-t="dev" style="flex:1">${devOpts || '<option value="">（先添加设备）</option>'}</select>`) +
+          '<button class="lh-ed-btn" data-mv="-1" type="button" title="上移">↑</button>' +
+          '<button class="lh-ed-btn" data-mv="1" type="button" title="下移">↓</button>' +
+          '<button class="lh-ed-btn danger" data-del="1" type="button" title="删除">×</button>';
+
+        row.querySelector('[data-t="type"]').onchange = (e) => {
+          if (e.target.value === 'ent') {
+            it.e = '';
+            it.n = it.n || '';
+            it.k = 'sensor';
+          } else {
+            it.n = (allDevs()[0] || {}).name || '';
+            delete it.e;
+            delete it.k;
+          }
+          commit(true);
+          renderSecurity();
+        };
+        if (isEnt) {
+          createEntityPicker(row.querySelector('[data-t="ent"]'), {
+            placeholder: '搜索实体…',
+            onChange: (v) => { it.e = v; commit(false); },
+          });
+          const nm = row.querySelector('[data-t="name"]');
+          nm.oninput = () => { it.n = nm.value; commit(false); };
+          nm.onchange = () => commit(true);
+          row.querySelector('[data-t="kind"]').onchange = (e) => {
+            it.k = e.target.value;
+            commit(true);
+          };
+        } else {
+          row.querySelector('[data-t="dev"]').onchange = (e) => {
+            it.n = e.target.value;
+            commit(true);
+          };
+        }
+        row.querySelectorAll('[data-mv]').forEach((b) => b.onclick = () => {
+          const j = i + Number(b.dataset.mv);
+          if (j < 0 || j >= panel.security.length) return;
+          const t = panel.security[i]; panel.security[i] = panel.security[j]; panel.security[j] = t;
+          commit(true);
+          renderSecurity();
+        });
+        row.querySelector('[data-del]').onclick = () => {
+          panel.security.splice(i, 1);
+          commit(true);
+          renderSecurity();
+        };
+        box.append(row);
+      });
+    }
+    $('#secAdd', wrap).onclick = () => {
+      panel.security.push({ n: (allDevs()[0] || {}).name || '' });
+      commit(true);
+      renderSecurity();
+    };
+    $('#secAdd', wrap).style.alignSelf = 'flex-start';
+
+    $('#scAdd', wrap).onclick = () => {
+      const id = 'sc' + Date.now().toString(36);
+      scenes.push({ id, name: '新情景', icon: 'i-bolt', actions: [] });
+      expanded.add(id);
+      commit(true);
+      renderScenes();
+    };
+    $('#scAdd', wrap).style.alignSelf = 'flex-start';
+
+    renderScenes();
+    renderQuick();
+    renderSecurity();
     return wrap;
   }
 

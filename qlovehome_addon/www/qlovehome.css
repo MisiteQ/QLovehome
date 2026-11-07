@@ -625,18 +625,20 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .plan { position: absolute; inset: 0; width: 100%; height: 100%; stroke: none; }
 
 .room-shape {
-  /* 没有 plan-wall-auto 了，room-shape fill 就是房间唯一的色块 —— 四季主题色浓度降一点 */
-  fill: rgba(var(--wall), 0.28);
+  /* 未选中时房间内部只铺一层极淡的底：让屏幕的季节氛围色透出来，
+     和 0.22 的墙体灰拉开差距（否则墙带和房间一个效果，看着像一整块灰）。
+     选中 / hover 才提亮，视线自然落到当前房间。 */
+  fill: rgba(var(--wall), 0.08);
   /* 每个房间一圈细细的灰色线框，区分房间边界 */
-  stroke: rgba(var(--wall), 0.35);
+  stroke: rgba(var(--wall), 0.30);
   stroke-width: 1;
   transition: fill .25s, stroke .25s;
   cursor: pointer;
 }
-.room-shape.t-warm { fill: rgba(var(--s1), 0.20); stroke: rgba(var(--wall), 0.35); }
-.room-shape.t-cool { fill: rgba(var(--s2), 0.16); stroke: rgba(var(--wall), 0.35); }
-.room-shape:hover { fill: rgba(var(--s1), 0.24); stroke: rgba(var(--s1), 0.42); }
-.room-shape.active { fill: rgba(var(--s1), 0.22); stroke: rgba(var(--s1), 0.6); stroke-width: 1.6; }
+.room-shape.t-warm { fill: rgba(var(--s1), 0.10); stroke: rgba(var(--s1), 0.26); }
+.room-shape.t-cool { fill: rgba(var(--s2), 0.09); stroke: rgba(var(--s2), 0.26); }
+.room-shape:hover { fill: rgba(var(--s1), 0.15); stroke: rgba(var(--s1), 0.42); }
+.room-shape.active { fill: rgba(var(--s1), 0.13); stroke: rgba(var(--s1), 0.6); stroke-width: 1.6; }
 .plan-wall { fill: rgba(var(--wall), 0.16); stroke: none; pointer-events: none; }
 /* 自动墙体：把所有房间 union 成整体后向外扩 wallW，fill-rule=evenodd 扣掉内部
    → 得到统一的灰色填充墙带。外墙一圈连续，相邻房间共享墙自动融合成一道，
@@ -735,6 +737,24 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 }
 .screen[data-theme=light] .marker.off .ico { stroke: #6f4d16; stroke-width: 2.1; }
 .screen[data-theme=light] .marker:hover circle.dot { stroke: var(--amber-2); stroke-width: 1.4; }
+
+/* ── 现实风格（照片底）上的设备状态 ──
+   扁平皮肤那套「琥珀实心 / 10% 幽灵」压在照片上几乎看不出差别：照片本身又深又花，
+   淡琥珀点既不够亮、幽灵态也不够暗。这里按 lovehome 的实拍调校值改成：
+   亮着的设备 = 亮金实心 + 一圈白光晕 + 深褐图标，关着的保持幽灵态（不发光），
+   一眼就能分出「在不在干活」。 */
+.screen[data-skin=real] .marker:not(.off) circle.dot {
+  fill: #f5bb3f;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, .95))
+          drop-shadow(0 0 9px rgba(255, 255, 255, .72))
+          drop-shadow(0 2px 7px rgba(var(--am), .45));
+}
+.screen[data-skin=real] .marker:not(.off) .ico { stroke: #4a3210; }
+.screen[data-skin=real] .marker:not(.off) .halo { opacity: 1; }
+.screen:not([data-theme=light])[data-skin=real] .marker:not(.off) circle.dot { fill: #ffd98a; }
+/* 关态在照片上要更「沉」：底盘压深、图标降低对比，和亮态拉开 */
+.screen[data-skin=real] .marker.off .cap { fill: rgba(9, 12, 18, 0.78); }
+.screen[data-skin=real] .marker.off .ico { stroke: rgba(var(--am), 0.62); }
 
 .plan-badge {
   position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%);
@@ -1606,7 +1626,9 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .cgrp-h { font-size: calc(10.5px * var(--fsk)); line-height: 1.65; color: var(--dim-2); margin: 0 0 4px; }
 .crow { display: flex; align-items: center; gap: 10px; min-height: 31px; font-size: calc(12.5px * var(--fsk)); color: var(--dim); }
 .crow .clab { flex: 0 0 auto; min-width: 0; white-space: nowrap; overflow: visible; text-overflow: clip; padding-right: 6px; }
-.crow .csw, .crow .cseg { flex: 1 1 auto; min-width: 0; }
+.crow .cseg { flex: 1 1 auto; min-width: 0; }
+/* 开关不跟着撑满整行：40×23 的小圆角开关，靠右对齐（之前 flex:1 会拉成一根长条） */
+.crow .csw { flex: none; margin-left: auto; }
 .crow.ro .cval { font-weight: 400; color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
 .crow.ro .cval.dead { color: var(--dim-2); }
 .cseg {
@@ -1691,6 +1713,23 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .screen.hide-top .season-toggles:hover { opacity: 1; }
 .screen.hide-side .stage { grid-template-columns: 0 minmax(0, 1fr) var(--rpw, 384px); }
 .screen.hide-side .side { opacity: 0; transform: translateX(-14px); pointer-events: none; overflow: hidden; }
+/* 右列两块都收起来时（房间面板没开、常驻栏也关了），第三列连同那 384px 一起收掉：
+   户型会铺到右边空出来的位置并重新居中，而不是恒定停在屏幕中间偏左。
+   ⚠️ 必须带 .screen.hide-side 的组合规则，否则被上一条（3 个类的选择器）压过去 */
+.stage.rp-off { grid-template-columns: var(--sidew, 185px) minmax(0, 1fr) 0; }
+.screen.hide-side .stage.rp-off { grid-template-columns: 0 minmax(0, 1fr) 0; }
+@media (max-width: 1000px) {
+  /* 这一档左栏已经收起（.side display:none），版面只剩「户型 + 右栏」两列。
+     不覆写的话，上面 .stage.rp-off 那套 185 / 1fr / 0 会把户型塞进第一列的 185px ——
+     手机桌面模式的 CSS 宽正好落在 901~1000，关掉右栏户型就缩成巴掌大，
+     中间那一整列空着。lovehome 里是同一个修正（.screen.alt-off .stage）。 */
+  .stage.rp-off { grid-template-columns: minmax(0, 1fr) 0; }
+  /* 同理：这一档左栏本来就不在版面上，再点「左栏收起」时 .screen.hide-side 那条
+     0 / 1fr / rpw 会把第一列压成 0 —— 户型只剩 plan-wrap 的 12px 宽度（极小极小）。
+     窄屏下 hide-side 没有任何可收的东西，直接按两列算。 */
+  .screen.hide-side .stage { grid-template-columns: minmax(0, 1fr) var(--rpw, 320px); }
+  .screen.hide-side .stage.rp-off { grid-template-columns: minmax(0, 1fr) 0; }
+}
 
 /* ── 底栏自适应（v194）──────────────────────────────────────────
    底栏这一行同时住着三块：左下品牌条（.footer-note）、底部筛选条（.filters）、
@@ -2111,6 +2150,17 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .lh-ed-row-title .lh-ed-row-id { font-weight: 400; color: #98a1ad; font-size: 11.5px; margin-left: 4px; }
+/* 名字太长时自动横向来回滚动（JS 只给真的溢出的元素加 .marquee，短名字不动）。
+   容器必须能收缩（min-width:0），否则在 flex/grid 里会被内容顶宽、永远不"溢出"。 */
+.nm-scroll { display: block; overflow: hidden; min-width: 0; }
+.nm-scroll > .nm-inner { display: inline-block; white-space: nowrap; }
+.nm-scroll.marquee > .nm-inner {
+  animation: nm-marquee var(--nm-dur, 8s) ease-in-out infinite alternate;
+}
+@keyframes nm-marquee {
+  0%, 10% { transform: translateX(0); }
+  90%, 100% { transform: translateX(var(--nm-shift, 0px)); }
+}
 .lh-ed-row-sub { font-size: 11.5px; color: #6b7280; margin-top: 3px; }
 .lh-ed-row-sub code {
   background: #f2f4f7; padding: 1px 5px; border-radius: 4px;
@@ -2146,6 +2196,10 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
   background: #fff; border: 1px solid #e3e6eb;
   border-radius: 14px; padding: 0; display: flex; flex-direction: column;
   box-shadow: 0 20px 50px rgba(15, 23, 42, .22);
+  /* 弹窗挂在 body 下，不在 .screen 里：浅色主题的 --text / --dim 不会作用到这里，
+     继承下来的是 :root 的深色值（#eceff4），白底上等于白字——批量导入整片看不清就是这个。
+     这里给弹窗自己定死深色字，里面所有没写颜色的文字都跟着变清楚。 */
+  color: #1f2430;
 }
 .lh-ed-dialog-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -2343,34 +2397,44 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 
 /* 批量导入 HA 实体弹窗 */
 .lh-ed-dialog.bulk-import .lh-ed-dialog-body { max-height: 85vh; display: flex; flex-direction: column; }
-.bulk-group { border-bottom: 1px solid var(--bd2); }
-.bulk-group-head { padding: 10px 18px; background: var(--bg2, #f0f3f7); display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 2; border-bottom: 1px solid var(--bd2); }
+/* 注意：这里不要用 var(--bg2) / var(--s3) ——
+   --bg1~3 是 0.08 这样的"透明度数字"、--s3 是 "72, 122, 128" 这样的 RGB 通道串，
+   直接当颜色用是非法值（fallback 也不会生效），背景会变透明、文字会继承深色主题的浅色 => 白底白字。
+   这个弹窗自己就是白底，颜色全部写死。 */
+.bulk-group { border-bottom: 1px solid #e9ecf1; }
+.bulk-group-head { padding: 10px 18px; background: #f5f7fa; display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 2; border-bottom: 1px solid #e9ecf1; }
 .bulk-group-head b { font-size: 14px; font-weight: 600; }
 .bulk-group-list { max-height: 280px; overflow-y: auto; padding: 6px 10px; }
 .bulk-item { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid transparent; transition: background 0.1s, border 0.1s; }
-.bulk-item:hover { background: var(--bg2, #eef1f6); border-color: var(--bd2); }
-.bulk-item.already { opacity: 0.4; cursor: not-allowed; }
-.bulk-item input[type=checkbox] { margin: 0; width: 16px; height: 16px; accent-color: var(--amber); }
+.bulk-item:hover { background: #f2f5f9; border-color: #e3e6eb; }
+.bulk-item.already { opacity: 0.55; cursor: not-allowed; }
+.bulk-item input[type=checkbox] { margin: 0; width: 16px; height: 16px; accent-color: #b8862e; }
 .bulk-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.bulk-id { font-family: ui-monospace, monospace; font-size: 11px; color: var(--s3, #8892a6); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bulk-state { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--bg2, #e8ebf0); min-width: 44px; text-align: center; font-weight: 500; }
-.bulk-state.on { background: rgba(34,197,94,0.15); color: #22c55e; }
-.bulk-state.off { background: rgba(107,114,128,0.15); color: #6b7280; }
-.bulk-state.unavailable { background: rgba(239,68,68,0.15); color: #ef4444; }
+.bulk-id { font-family: ui-monospace, monospace; font-size: 11px; color: #6b7280; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bulk-state { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #eef1f5; color: #4b5563; min-width: 44px; text-align: center; font-weight: 500; }
+.bulk-state.on { background: rgba(34,197,94,0.15); color: #15803d; }
+.bulk-state.off { background: rgba(107,114,128,0.15); color: #4b5563; }
+.bulk-state.unavailable { background: rgba(239,68,68,0.15); color: #b91c1c; }
 
 /* 新批量导入：按设备卡片分组 */
 .bulk-dev-list { display: flex; flex-direction: column; gap: 8px; }
-.bulk-dev-card { border: 1px solid var(--bd2, #e3e6eb); border-radius: 8px; overflow: hidden; }
-.bulk-dev-card.all-already { opacity: 0.5; }
-.bulk-dev-head { padding: 8px 12px; background: var(--bg2, #f4f6f9); display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--bd2, #e3e6eb); }
-.bulk-dev-label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
-.bulk-dev-label input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--amber); }
-.bulk-dev-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--s3, #8892a6); }
-.bulk-dev-kind { background: rgba(255,170,40,0.15); color: var(--amber-2, #e08a20); padding: 1px 6px; border-radius: 6px; font-weight: 500; }
-.bulk-dev-model { opacity: 0.7; font-family: ui-monospace, monospace; font-size: 10px; }
-.bulk-dev-count { font-weight: 500; }
-.bulk-dev-toggle { border: none; background: none; cursor: pointer; font-size: 14px; color: var(--s3, #8892a6); padding: 0 4px; margin-left: auto; }
-.bulk-dev-toggle:hover { color: var(--fg, #1a202c); }
+/* 注意 flex: 0 0 auto —— 列表是 column flex，卡片带 overflow:hidden，
+   默认 min-height:auto 会退化成 0，几十张卡会被压成一条条细线（设备列表"空白"就是这个） */
+.bulk-dev-card { border: 1px solid #e3e6eb; border-radius: 8px; overflow: hidden; flex: 0 0 auto; background: #fff; }
+.bulk-dev-card.all-already { opacity: 0.55; }
+.bulk-dev-head { padding: 8px 12px; background: #f5f7fa; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #e9ecf1; }
+.bulk-dev-label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: #1f2430; cursor: pointer; flex: 0 1 auto; min-width: 0; }
+/* 设备名不折行：以前被右侧元信息一挤，“飞牛+”会断成“飞牛 / +”，看着像乱码 */
+.bulk-dev-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bulk-dev-label input[type=checkbox] { width: 16px; height: 16px; accent-color: #b8862e; }
+.bulk-dev-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #6b7280; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+/* 徽章不许折行：以前被挤成一条竖排的“状态传感器”，字挤在一起更看不清 */
+.bulk-dev-kind { background: rgba(200, 132, 20, 0.14); color: #9a6414; padding: 1px 6px; border-radius: 6px; font-weight: 600; white-space: nowrap; flex: 0 0 auto; }
+.bulk-dev-model { opacity: 0.85; color: #8a93a3; font-family: ui-monospace, monospace; font-size: 10px; }
+.bulk-dev-count { font-weight: 500; color: #4b5563; }
+.bulk-dev-count code { font-size: 10.5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+.bulk-dev-toggle { border: none; background: none; cursor: pointer; font-size: 14px; color: #7c8697; padding: 0 4px; margin-left: auto; }
+.bulk-dev-toggle:hover { color: #1f2430; }
 .bulk-dev-ents { display: flex; flex-direction: column; padding: 4px 8px; gap: 2px; max-height: 240px; overflow-y: auto; }
 .lh-ent-picker { position: relative; }
 .lh-ent-dropdown { position: fixed; background: #fff !important; border: 1px solid var(--bd2, #e3e6eb); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 200000; overflow: hidden; color: #1a202c; }

@@ -294,12 +294,35 @@
     return apiAuditLoad(limit, event);
   }
 
+  /* 只重画「看得见的那几块」：房间面板 / 常驻栏 / 控制弹窗 / 户型图 / 左栏统计。
+     任何一块没开就自己 return，互不影响。 */
+  function repaintNow() {
+    try { paintMarkers(); } catch (e) { /* 忽略 */ }
+    try { paintGlow(); } catch (e) { /* 忽略 */ }
+    try { refreshSide(); } catch (e) { /* 忽略 */ }
+    try { refreshRoom(); } catch (e) { /* 忽略 */ }
+    try { refreshAlt(); } catch (e) { /* 忽略 */ }
+    try { refreshControl(); } catch (e) { /* 忽略 */ }
+  }
+
   /* 控制下发：走后端 service_call（自动记审计日志），失败回落到直接 hass.callService */
   function sendControl(domain, service, data, label) {
     const h = hass();
     if (!h) { toast('还没连上 HA'); return; }
     const ent = (data || {}).entity_id;
     const before = ent ? st(ent) : null;
+
+    /* ★ 乐观显示：开关类命令先把界面切到目标态再下发，不等设备回报（云端设备回报常见 1~5 秒，
+       以前界面要等回报才变，看着像"点了没反应 / 关了还显示开"）。
+       真实状态一到就由 isOn() 自动撤掉这份覆盖；8 秒没到则退回真实状态。 */
+    const want = service === 'toggle' ? !isOnEntity(ent)
+      : service === 'turn_on' || service === 'open_cover' || service === 'unlock' || service === 'start' ? true
+      : service === 'turn_off' || service === 'close_cover' || service === 'lock' || service === 'stop' ? false
+      : null;
+    if (ent && want != null) {
+      optimistic[ent] = { want, until: Date.now() + 8000 };
+      repaintNow();
+    }
 
     // ★ 优先走后端 service_call（自动记审计日志）
     const viaBackend = () => {
@@ -317,7 +340,8 @@
       p = p.catch(() => false);
 
       const settle = () => {
-        setTimeout(() => { paintMarkers(); paintGlow(); refreshRoom(); refreshControl(); }, 800);
+        /* 设备回报有快有慢（云端设备 1-3 秒），这几次补画能覆盖绝大多数情况 */
+        [400, 1200, 3000].forEach((ms) => setTimeout(repaintNow, ms));
         if (!before) return;
         setTimeout(() => {
           const now = st(ent);
@@ -835,7 +859,21 @@
     }
     return stateLabel(s);
   }
-  function isOn(d) {
+  /* 下发后的乐观显示：{ [entity]: { want, until } }
+     点下开关立刻变，不等设备回报（米家这类云端设备回报常见 1~5 秒）。
+     真实状态跟上就自动撤掉；8 秒还没跟上的退回真实状态，命令失败时不会一直显示错的开/关。 */
+  const optimistic = {};
+  /* 只看实体本身算「开着吗」—— 下发前用它判断 toggle 的方向 */
+  function isOnEntity(ent) {
+    const s = st(ent);
+    if (!s) return false;
+    const dom = (ent || '').split('.')[0];
+    if (dom === 'climate') return !['off', 'unavailable', 'unknown'].includes(s.state);
+    if (dom === 'cover') return s.state !== 'closed' && s.state !== 'unavailable';
+    if (dom === 'media_player') return ['playing', 'paused', 'on', 'idle'].includes(s.state);
+    return ON_STATES.includes(s.state) || s.state === 'unlocked';
+  }
+  function isOnReal(d) {
     /* 面板 / 门铃 / 门锁这类复合设备是"在线可操作"，不该按开关态画成灰的 */
     if (d.ctl && d.ctl.always) return true;
     const dom = d.entity.split('.')[0];
@@ -849,6 +887,18 @@
     if (dom === 'climate') return !['off', 'unavailable', 'unknown'].includes(s.state);    if (dom === 'cover') return s.state !== 'closed' && s.state !== 'unavailable';
     if (dom === 'media_player') return ['playing', 'paused', 'on', 'idle'].includes(s.state);
     return s.state === 'on' || s.state === 'open';
+  }
+  /* 开关态：乐观值优先（刚点过、设备还没回报），其余一律读真实状态。
+     每个表面（房间面板 / 常驻栏 / 弹窗 / 户型图）都走这一个判据，不会出现"某个地方还亮着"。 */
+  function isOn(d) {
+    const ent = d && d.entity;
+    const o = ent ? optimistic[ent] : null;
+    if (o) {
+      if (Date.now() > o.until) delete optimistic[ent];          // 等超时了：退回真实状态
+      else if (isOnReal(d) === o.want) delete optimistic[ent];   // 真实状态已跟上：撤掉覆盖
+      else return o.want;
+    }
+    return isOnReal(d);
   }
 
   /* 图标「发亮」的判据 —— 跟 isOn() 是两回事，别合回来：
@@ -1087,6 +1137,80 @@
     return d + 'Z';
   }
 
+  /* 房间轮廓规范化：手绘 / 从照片描出来的房间，拐角常带一小段 1~2px 的斜边
+     （两三个几乎重合的点）。roundPath 会按「最短相邻边 / 2.2」收半径，于是同样写 11，
+     有的房间是圆角、有的几乎是直角，看着每个房间倒角都不一样。
+     这里先把最短的碎边逐条并掉，再统一倒角 —— 所有房间的圆角半径才一致。 */
+  function slimPoly(p, minEdge) {
+    const a = (p || []).slice();
+    const lim = minEdge || 3.2;
+    let guard = a.length + 8;
+    while (a.length > 3 && guard-- > 0) {
+      let k = -1, len = Infinity;
+      for (let i = 0; i < a.length; i++) {
+        const j = (i + 1) % a.length;
+        const d = Math.hypot(a[j][0] - a[i][0], a[j][1] - a[i][1]);
+        if (d < len) { len = d; k = i; }
+      }
+      if (len >= lim) break;
+      const j = (k + 1) % a.length;
+      a[k] = [(a[k][0] + a[j][0]) / 2, (a[k][1] + a[j][1]) / 2];
+      a.splice(j, 1);
+    }
+    return a;
+  }
+  /* 轴向吸附：描边 / 照片识别出来的房间点列，每条边常带 1px 左右的斜向错位
+     （本该是直墙，却是一串 1px 一折的台阶）。吸附到水平/垂直之后，
+     一堵墙才会真正是「一条边」，倒角才不会被碎边卡住。 */
+  function snapAxis(p, tol) {
+    const a = (p || []).map((q) => [q[0], q[1]]);
+    const n = a.length;
+    const t = tol == null ? 1.3 : tol;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        const dx = a[j][0] - a[i][0];
+        const dy = a[j][1] - a[i][1];
+        if (Math.abs(dx) <= t) { const x = (a[i][0] + a[j][0]) / 2; a[i][0] = x; a[j][0] = x; }
+        if (Math.abs(dy) <= t) { const y = (a[i][1] + a[j][1]) / 2; a[i][1] = y; a[j][1] = y; }
+      }
+    }
+    return a;
+  }
+
+  /* 去共线点：落在相邻两点连线上的中间点全部丢掉（公差 0.8px） */
+  function dropCollinear(p, tol) {
+    const a = (p || []).slice();
+    const t = tol == null ? 0.8 : tol;
+    let changed = true;
+    while (changed && a.length > 3) {
+      changed = false;
+      const n = a.length;
+      for (let i = 0; i < n; i++) {
+        const pv = a[(i - 1 + n) % n], cur = a[i], nx = a[(i + 1) % n];
+        const dx = nx[0] - pv[0], dy = nx[1] - pv[1];
+        const l2 = dx * dx + dy * dy;
+        if (!l2) continue;
+        let tt = ((cur[0] - pv[0]) * dx + (cur[1] - pv[1]) * dy) / l2;
+        tt = Math.max(0, Math.min(1, tt));
+        const dev = Math.hypot(cur[0] - (pv[0] + dx * tt), cur[1] - (pv[1] + dy * tt));
+        if (dev <= t) { a.splice(i, 1); changed = true; break; }
+      }
+    }
+    return a;
+  }
+
+  const ROOM_R = 11;
+  /* 房间统一的圆角路径：房间色块 / 墙体挖洞 / 光晕裁切都走这一个函数，
+     保证三层的轮廓逐点一致（否则墙角会露出/盖住房间边）。
+     倒角前先净化点列（轴向吸附 → 去共线 → 并碎边）：否则 roundPath 只能按
+     最短的那条碎边收半径（主卧 2.8、阳台 4.1），和 4 点矩形房间的 11 摆在一起，
+     就成了「有的直角、有的倒角」。净化后每个角都能吃满同一个半径。 */
+  function roomPath(points, r) {
+    const p = slimPoly(dropCollinear(snapAxis(parsePoly(points))), 6);
+    return p.length >= 3 ? roundPath(p, r == null ? ROOM_R : r) : '';
+  }
+
   let planVB = null; // { std, real }：扁平/现实两套 viewBox，皮肤切换时换用（现实风外框更大）
 
   /* ── 户型几何：外轮廓 / 墙体都按「用户画出来的房间」实时算 ──
@@ -1202,6 +1326,103 @@
       cur = out;
     }
     return cur;
+  }
+
+  /* ── 欧氏距离变换（Felzenszwalb 一维两趟）──
+     返回每个格子到最近「源格」的距离平方（单位：格）。
+     用来做真正的等距外扩：外扩 d 之后，外凸的角是半径 d 的圆弧，内凹的角也是圆弧。
+     原来的 chaikin 是按边长 1/4 切角 —— 长边被切掉一大块、短边几乎不动，
+     所以画出来有的角鼓出去、有的角还带棱，这就是虚线看着别扭的根因。 */
+  function edt1d(f, n) {
+    const d = new Float64Array(n);
+    const v = new Int32Array(n), z = new Float64Array(n + 1);
+    let k = 0;
+    v[0] = 0; z[0] = -Infinity; z[1] = Infinity;
+    for (let q = 1; q < n; q++) {
+      let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= z[k]) {
+        k--;
+        s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      }
+      k++; v[k] = q; z[k] = s; z[k + 1] = Infinity;
+    }
+    k = 0;
+    for (let q = 0; q < n; q++) {
+      while (z[k + 1] < q) k++;
+      d[q] = (q - v[k]) * (q - v[k]) + f[v[k]];
+    }
+    return d;
+  }
+
+  function edt2d(mask, gw, gh) {
+    const INF = 1e20;
+    const g = new Float64Array(gw * gh);
+    for (let i = 0; i < g.length; i++) g[i] = mask[i] ? 0 : INF;
+    const col = new Float64Array(gh), row = new Float64Array(gw);
+    for (let x = 0; x < gw; x++) {
+      for (let y = 0; y < gh; y++) col[y] = g[y * gw + x];
+      const d = edt1d(col, gh);
+      for (let y = 0; y < gh; y++) g[y * gw + x] = d[y];
+    }
+    for (let y = 0; y < gh; y++) {
+      for (let x = 0; x < gw; x++) row[x] = g[y * gw + x];
+      const d = edt1d(row, gw);
+      for (let x = 0; x < gw; x++) g[y * gw + x] = d[x];
+    }
+    return g;
+  }
+
+  /* 房间并集向外等距 d 的轮廓环（贴着外墙、凹口也会跟着折弯） */
+  function offsetOutline(polys, d) {
+    const valid = (polys || []).filter((p) => p.length >= 3);
+    if (!valid.length) return null;
+    let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    valid.forEach((p) => p.forEach(([x, y]) => {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }));
+
+    let cell = 2;
+    const spanW = maxX - minX + d * 2 + 16;
+    const spanH = maxY - minY + d * 2 + 16;
+    if ((spanW / cell) * (spanH / cell) > 220000) {
+      cell = Math.sqrt((spanW * spanH) / 220000);
+    }
+    const x0 = minX - d - cell * 3, y0 = minY - d - cell * 3;
+    const gw = Math.ceil(spanW / cell) + 6, gh = Math.ceil(spanH / cell) + 6;
+    if (gw < 4 || gh < 4) return null;
+
+    const grid = new Uint8Array(gw * gh);
+    scanlineFill(grid, valid, gw, gh, x0, y0, cell);
+    const dist = edt2d(grid, gw, gh);
+
+    const dc = d / cell;
+    const mask = new Uint8Array(gw * gh);
+    for (let i = 0; i < mask.length; i++) {
+      mask[i] = (grid[i] || dist[i] <= dc * dc) ? 1 : 0;
+    }
+    const loops2 = traceLoops(marchingSquaresSegs(mask, gw, gh, x0, y0, cell));
+    if (!loops2.length) return null;
+
+    /* 保留所有足够大的环（分开的附属间不会被丢掉）；小的栅格噪点直接过滤 */
+    const areaOf = (l) => {
+      let a = 0;
+      for (let i = 0; i < l.length; i++) {
+        const p1 = l[i], p2 = l[(i + 1) % l.length];
+        a += p1[0] * p2[1] - p2[0] * p1[1];
+      }
+      return Math.abs(a) / 2;
+    };
+    const areas = loops2.map(areaOf);
+    const maxArea = Math.max(...areas);
+    return loops2
+      .filter((l, i) => areas[i] > Math.max(maxArea * 0.01, cell * cell * 6))
+      .map((l) => {
+        const closed = l.concat([l[0]]);
+        const simp = rdp(closed, Math.max(1.0, cell * 0.65));
+        if (simp.length > 1) simp.pop();
+        return simp.map((p) => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]);
+      });
   }
 
   /* 自动外轮廓（贴合墙体、支持凹口）：
@@ -1489,7 +1710,7 @@
     return d + 'Z';
   }
 
-  window.LHGeo = { roomPoints, convexHull, inflate, smoothClosedPath, autoOutlineLoops, chaikin, rdp, loopPath, parsePoly, unionPolys };
+  window.LHGeo = { roomPoints, convexHull, inflate, smoothClosedPath, autoOutlineLoops, offsetOutline, chaikin, rdp, loopPath, parsePoly, unionPolys, slimPoly, roomPath };
 
   /* 把鼠标事件坐标转换成 SVG viewBox 坐标系中的点 */
   function svgPoint(svg, e) {
@@ -1534,7 +1755,17 @@
     /* 没有房间时 autoOutlineLoops 返回 null —— 不再 fallback 到模板里写死的 plan.outline
        （那是原始户型的坐标，用户删了房间之后不该再露出来）。
        改用 plan.w / plan.h 画一个默认正方形占位框。 */
-    const autoLoops = LH.rooms.length ? autoOutlineLoops(20) : null;
+    const WALL_W = LH.plan.wallW || 3;
+    /* 虚线离房间的距离：墙厚 + 15px 呼吸位（原来是 +5，用户要求再拉开 10px）。
+       注意下面 clipPath / 底纹 / viewBox 都跟着这条线走，改这一个数就全同步 */
+    const DASH_OUT = WALL_W + 15;
+    const planPolys = LH.rooms.filter((r) => r.pts).map((r) => parsePoly(r.pts));
+    /* 虚线外框 = 房间并集向外 DASH_OUT。
+       用欧氏距离场做等距外扩，拐角是半径一致的圆弧，并且会贴着每一段外墙走 ——
+       改之前是「膨胀 20 + chaikin」，距离随手画一样忽远忽近，长边还被切掉一大块。 */
+    const autoLoops = (LH.plan.autoFrame !== false && planPolys.length)
+      ? offsetOutline(planPolys, DASH_OUT)
+      : null;
     let ringPts;
     if (autoLoops) {
       ringPts = autoLoops.reduce((a, l) => a.concat(l), []);
@@ -1552,8 +1783,13 @@
     svg.setAttribute('viewBox', vbStd);
     planVB = { std: vbStd, real: null };
 
+    /* 距离场提出来的是 2px 一折的折线，用 roundPath 按外扩半径重新倒成圆弧；
+       半径会被 roundPath 按相邻边长自动收敛，不会把短边吃掉。 */
+    const dashD = autoLoops
+      ? autoLoops.map((l) => roundPath(l.map((p) => p.join(',')).join(' '), DASH_OUT)).join(' ')
+      : '';
     const ringD = autoLoops
-      ? autoLoops.map(loopPath).join(' ')
+      ? dashD
       : ringPts.length ? roundPath(ringPts.map((p) => p.join(',')).join(' '), 16) : '';
 
     if (ringD) {
@@ -1608,25 +1844,24 @@
     /* 自动墙体：把所有房间 union 成整体形状，向外扩 wallW 得到墙带外边界；
        内边界直接用每个房间的原始轮廓（不 union，避免栅格化误差导致的缝隙）；
        fill-rule=evenodd 精确扣掉每个房间 → 得到无缝的灰色墙带。 */
-    if (LH.plan.autoFrame !== false && LH.rooms.length) {
-      const R = LH.plan.wallW || 3;
-      const polys = LH.rooms.filter(r => r.pts).map(r => LHGeo.parsePoly(r.pts));
-      if (polys.length >= 1) {
-        const unionOuter = LHGeo.unionPolys(polys, R);
-        if (unionOuter) {
-          // 外边界：union 扩展后的整体轮廓（先 chaikin 圆滑，再 roundPath 倒角）
-          const smoothOuter = LHGeo.chaikin(unionOuter, 2);
-          let d = roundPath(smoothOuter, 16);
-          // 内边界：每个房间自己的原始轮廓（不 union，零栅格误差）
-          LH.rooms.forEach((r) => {
-            if (r.pts) d += ' ' + roundPath(r.pts, 11);
-          });
-          const wallPath = document.createElementNS(NS, 'path');
-          wallPath.setAttribute('d', d);
-          wallPath.setAttribute('class', 'plan-wall-auto');
-          wallPath.setAttribute('fill-rule', 'evenodd');
-          svg.append(wallPath);
-        }
+    if (LH.plan.autoFrame !== false && planPolys.length) {
+      /* 外边界：房间并集等距外扩 wallW，拐角圆弧半径处处等于 wallW（chaikin 是按边长切角，
+         长边被切一大块、短边几乎不动，所以以前墙拐角看着不圆滑）；
+         内边界：每个房间自己的圆角轮廓；evenodd 精确扣掉房间 → 无缝墙带。 */
+      const outerLoops = offsetOutline(planPolys, WALL_W);
+      if (outerLoops) {
+        let d = outerLoops
+          .map((l) => roundPath(l.map((p) => p.join(',')).join(' '), WALL_W))
+          .join(' ');
+        // 内边界：每个房间自己的原始轮廓（不 union，零栅格误差）
+        LH.rooms.forEach((r) => {
+          if (r.pts) d += ' ' + roomPath(r.pts);
+        });
+        const wallPath = document.createElementNS(NS, 'path');
+        wallPath.setAttribute('d', d);
+        wallPath.setAttribute('class', 'plan-wall-auto');
+        wallPath.setAttribute('fill-rule', 'evenodd');
+        svg.append(wallPath);
       }
     }
 
@@ -1640,7 +1875,7 @@
       const cp = document.createElementNS(NS, 'clipPath');
       cp.setAttribute('id', 'rclip-' + r.id);
       const cpp = document.createElementNS(NS, 'path');
-      cpp.setAttribute('d', roundPath(r.pts, 11));
+      cpp.setAttribute('d', roomPath(r.pts));
       cp.append(cpp);
       defs.append(cp);
 
@@ -1662,7 +1897,7 @@
       g.append(glow);
 
       const poly = document.createElementNS(NS, 'path');
-      poly.setAttribute('d', roundPath(r.pts, 11));
+      poly.setAttribute('d', roomPath(r.pts));
       poly.setAttribute('class', 'room-shape' + (TONE[r.id] ? ' ' + TONE[r.id] : ''));
       poly.dataset.room = r.id;
       g.append(poly);
@@ -1685,7 +1920,7 @@
       wm.append(mw);
       LH.rooms.forEach((r) => {
         const hole = document.createElementNS(NS, 'path');
-        hole.setAttribute('d', roundPath(r.pts, 11));
+        hole.setAttribute('d', roomPath(r.pts));
         hole.setAttribute('fill', '#000');
         wm.append(hole);
       });
@@ -2055,6 +2290,7 @@
     /* 房间面板与右列常驻栏互斥：开房间面板就把它收掉，列宽不变 */
     const ap = $('#altPanel');
     if (ap) ap.hidden = true;
+    syncStageCols();
     const tv = r.temp ? num(r.temp, null) : null;
     const hv = r.hum ? num(r.hum, null) : null;
     const roomDevs = visibleDevices().filter((d) => d.room === id);
@@ -2275,9 +2511,21 @@
   /* 统一的显隐判定：开着 + 够宽 + 没开房间面板 + 在首页 才显示 */
   function syncAlt() {
     const p = $('#altPanel');
+    syncStageCols();
     if (!p) return;
     if (altWide() && altOn() && !state.room && state.page === 'home') paintAlt();
     else p.hidden = true;
+    syncStageCols();
+  }
+  /* 右列（房间面板 / 常驻栏）两块都不在时，把第三列也收成 0 —— 户型铺到空出来的位置并重新居中。
+     左栏那边是 .screen.hide-side 管第一列，两条规则可以叠加。 */
+  function syncStageCols() {
+    const st = $('#stage');
+    if (!st) return;
+    const rp = $('#roomPanel');
+    const ap = $('#altPanel');
+    const rightOn = (rp && !rp.hidden) || (ap && !ap.hidden);
+    st.classList.toggle('rp-off', !rightOn);
   }
 
   /* ── 设备控制浮层：所有可操作设备都能开，控件按域 + 实体实际能力拼 ── */
@@ -5489,8 +5737,8 @@
   }
 
   function paintValues() {
-    /* 壁挂屏常年开着，但切到 HA 别的面板 / 息屏时没必要每 2 秒重排一次 */
-    if (document.hidden) return;
+    /* 不按 document.hidden 提前返回了：在 HA 的 iframe 里隐藏状态判断不可靠，
+       一旦被判定成 hidden 就整屏不再刷新（以前点开关后只有刷新页面才更新的怪象之一）。 */
     const t = roomAvg('temp') ?? num(LH.config.weather.temp, null);
     const h = roomAvg('hum') ?? num(LH.config.weather.hum, null);
     $('#inTemp').textContent = t == null ? '—' : t.toFixed(1);
@@ -5535,6 +5783,9 @@
     refreshSide();
     refreshRoom();
     refreshAlt();
+    /* 控制弹窗也要跟着走：以前只靠下发后的三次补画，设备回报晚于 3 秒时，
+       弹窗里的「开启 / 关闭」会一直停在旧文案，直到刷新页面 */
+    refreshControl();
     paintPeople();
   }
 
@@ -6127,6 +6378,22 @@
     });
   }
 
+  /* 顶栏情景按钮：编辑器改完（QLOVEHOME_RERENDER）后也按新配置重排 */
+  function paintScenes() {
+    const box = $('#scenes');
+    if (!box) return;
+    box.innerHTML = '';
+    (LH.scenes || []).forEach((s) => {
+      const b = el('button', 'pill');
+      b.type = 'button';
+      /* title 用情景自带的 hint：一眼能看出这一下会动多少设备（比如「打开全屋 25 盏灯」） */
+      b.title = s.hint || s.name;
+      b.innerHTML = `<svg><use href="#${s.icon}"/></svg><span>${esc(s.name)}</span>`;
+      b.addEventListener('click', () => applyScene(s.id));
+      box.append(b);
+    });
+  }
+
   /* ── 启动 ── */
   function wire() {
     /* 滑块拖到外面松手时 pointerup 不落在 input 上，state.drag 会一直卡在 true，
@@ -6134,16 +6401,7 @@
     ['pointerup', 'pointercancel'].forEach((t) =>
       window.addEventListener(t, () => { state.drag = false; }, true));
 
-    const scenes = $('#scenes');
-    LH.scenes.forEach((s) => {
-      const b = el('button', 'pill');
-      b.type = 'button';
-      /* title 用情景自带的 hint：一眼能看出这一下会动多少设备（比如「打开全屋 25 盏灯」） */
-      b.title = s.hint || s.name;
-      b.innerHTML = `<svg><use href="#${s.icon}"/></svg><span>${esc(s.name)}</span>`;
-      b.addEventListener('click', () => applyScene(s.id));
-      scenes.append(b);
-    });
+    paintScenes();
 
     /* 家人在线（v218）：接在情景按钮后面的小 chip，不显示具体人名 */
     const pbar = $('#peopleBar');
@@ -6499,6 +6757,12 @@
   }
 
   let tick = null;
+  /* ★ 状态随动：每隔 350ms 比一次 hass.states 的引用，换了就立刻重绘（HA 每次更新都会换新对象）。
+     原来的 2 秒轮询是唯一刷新源，开关按下后最多要等 2 秒才跳，体感很慢。 */
+  let stateWatch = null;
+  let lastStatesRef = null;
+  let watchPend = null;
+  let lastWatchPaint = 0;
   /* ★ 老设备实体迁移：给没有 entities 数组的设备补全 device_id + 兄弟实体
      升级到新版后自动跑一次，跑完写回 localStorage，让旧户型图也能匹配 DEVICE_TEMPLATES */
   function migrateDeviceEntities() {
@@ -6662,6 +6926,24 @@
       if (nowLive !== state.online) { state.online = nowLive; paintValues(); }
       else paintValues();
     }, LH.config.refreshMs || 2000);
+    /* ★ 状态随动：HA 收到任何状态更新都会把 hass.states 换成新对象，比引用就知道该重画了。
+       350ms 轮询 + 300ms 节流：按下开关后基本 0.4 秒内就能看到灯变，而不是等 2 秒。 */
+    clearInterval(stateWatch);
+    stateWatch = setInterval(() => {
+      const h = hass();
+      if (!h || !h.states) return;
+      if (h.states === lastStatesRef) return;
+      lastStatesRef = h.states;
+      const now = Date.now();
+      const gap = now - lastWatchPaint;
+      if (gap >= 300) { lastWatchPaint = now; paintValues(); return; }
+      if (watchPend) return;
+      watchPend = setTimeout(() => {
+        watchPend = null;
+        lastWatchPaint = Date.now();
+        paintValues();
+      }, 300 - gap);
+    }, 350);
     state.booted = true;
     /* 通知编辑器：boot 已完成，可以安全地触发重绘/注入入口 */
     window.QLOVEHOME_BOOTED = true;
@@ -6687,6 +6969,7 @@
     // 2) 重建左栏（全屋统计 + 房间列表）和底部筛选条
     buildSide();
     buildFilterChips();
+    paintScenes();
     // 3) 如果当前正在看房间面板，也刷新一下
     if (state.room) {
       openRoom(state.room, true);

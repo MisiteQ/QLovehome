@@ -6,6 +6,8 @@
 [![GitHub issues](https://img.shields.io/github/issues/MisiteQ/QLovehome.svg)](https://github.com/MisiteQ/QLovehome/issues)
 [![GitHub stars](https://img.shields.io/github/stars/MisiteQ/QLovehome.svg)](https://github.com/MisiteQ/QLovehome/stargazers)
 
+> ⚠️ **这是一个非常初级的版本，还有很多问题，后续会慢慢修改完善。** 有需要的朋友可以在 [Issues](https://github.com/MisiteQ/QLovehome/issues) 提需求，也欢迎自行下载改进。
+
 面向门口 / 客厅平板的 **Home Assistant 全屋大屏面板**。
 可作为 **HAOS 加载项（Add-on）** 或 **HACS 集成** 安装，零 YAML，零 Webpack——HTML + SVG + JS，源码可读可改。
 
@@ -274,6 +276,7 @@ pwsh -File scripts/sync-www.ps1
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| **v1.4.8** | 2026-11-07 | 🎨 **户型图外墙虚线重做**：改为「房间并集 → 欧氏距离变换 → 等距外扩」，虚线沿全部外墙外侧 15px 一圈贴合（呼吸位由 5px 加到 15px），凹凸台阶、错层都能跟着折弯；外凸/内凹拐角统一成半径一致的圆弧（原实现是按边长 1/4 切角，长边被切掉一大块、短边几乎不动，所以有的角鼓、有的角带棱）。墙体同步改用同一套外扩轮廓 + `evenodd` 扣房间，墙带与拐角交接无缝隙、无锯齿。<br>🐛 **修复「批量导入看不到设备」**：设备卡片所在的列表是 column flex，卡片带 `overflow:hidden` 会让 `min-height:auto` 退化成 0，几十台设备被压成一条条 2px 细线（看着像空白列表）。给 `.bulk-dev-card` 加 `flex:0 0 auto`，卡片恢复正常高度。<br>🎨 **修复「批量导入整片字看不清」**：弹窗挂在 `body` 下、不在 `.screen` 里，浅色主题的 `--text` 作用不到它，继承下来的是 `:root` 的深色值（`#eceff4`），白底上等于白字；另外 `--bg1~3` 是透明度数字、`--s3` 是 RGB 通道串，被当颜色用属非法值（回退也不生效）。现在弹窗自己定死一套浅底深字（正文 `#1f2430`、次要 `#6b7280`、徽章 `#9a6414`），徽章不折行、设备名不拆字、实体 id 超长省略。<br>↔️ **长名字自动滚动**：添加 / 编辑设备时实体名（`friendly_name` 经常是「客厅小米智能多模网关子设备墙壁插座」这种）在实体选择下拉、批量导入的设备卡片与展开的实体列表、设备列表行里，只要放不下就自动横向来回滚动，短名字完全静止；只在真的溢出时才启动动画（CSS keyframes + JS 量 `scrollWidth`）。<br>🧭 **边栏收起后户型图铺满空出来的位置**：原来第三列恒定 384px（房间面板 / 常驻栏互斥占用），两块都关掉后右边仍空着 384px，户型永远停在屏幕偏左。现在 `.stage` 会按右列是否可见切 `rp-off`，两块都不在时第三列收成 0，配合原有的 `hide-side`（第一列收 0），户型自动铺满并重新居中；开房间面板 / 点「首页」恢复常驻栏时又自动让回去，全程带 `.32s` 列宽过渡。<br>🐛 **修复「设备开关是一根长条」**：`.crow .csw` 原来写了 `flex:1 1 auto`，开关被拉满整行；改为 `flex:none` + 靠右，恢复 40×23 的小圆角开关。<br>⚡ **状态刷新提速 + 修复「关了开关界面还显示开，必须刷新页面」**：① 去掉 `paintValues()` 里 `document.hidden` 提前返回（在 HA 的 iframe 里这个判断不可靠，一旦被判成 hidden，整屏就再也不刷新了）；② 2 秒轮询原本只刷房间面板 / 常驻栏，**漏了控制弹窗**——现在 `paintValues()` 也调 `refreshControl()`，弹窗里的「开启 / 关闭」不会再停在旧文案；③ 新增**乐观显示**：点下发命令时界面立即切到目标态（云端设备回报常要 1–5 秒），真实状态一到自动撤掉覆盖，8 秒仍没跟上则退回真实状态，命令失败也不会一直显示错的开/关；④ 原来只有 2 秒轮询这一条刷新源，再加 350ms 的 `hass.states` 引用比对 + 300ms 节流，灯基本 0.4 秒内就有反馈。 |
 | **v1.4.7** | 2026-11-06 | 🐛 **修复「顶部白条（QLovehome 标题栏）藏不掉」**：集成面板由 Home Assistant 的 `<hass-subpage>` 包着，那条白底标题栏是它 shadow DOM 里的 `.toolbar`（不是 `.header`），原先的样式注入既没扫 `hass-subpage` 这个标签、也没写 `.toolbar` 选择器，所以「隐藏 HA 顶栏」按钮和全屏联动都无效。现在把 `hass-subpage` / `ha-panel-app` 加入扫描列表，并把 `.toolbar` 藏掉的同时把 `.content` 高度补回 100%（否则底部会留 56px 空白） |
 | **v1.4.6** | 2026-11-06 | 🐛 **修复发布包 zip 路径分隔符错误**（v1.4.4/v1.4.5 的包都有这个问题）：.NET Framework 的 `Compress-Archive` / `ZipFile.CreateFromDirectory` 会把目录分隔符写成反斜杠 `\`，在 Linux 上解压后 `www\index.html` 变成一个**文件名**而不是 `www/` 目录，集成找不到前端文件 → 静态目录注册失败 → 面板 iframe 404 → HA 回落到自己的界面 → 又是无限套娃。`scripts/package.ps1` 改为手工写 zip 条目并强制正斜杠，打包时自检：出现反斜杠条目直接失败退出 |
 | **v1.4.5** | 2026-11-06 | 🐛 **修复「打开后 HA 无限套娃」**：前端静态目录原先挂在 `/qlovehome/www`，正好在侧边栏面板路径 `/qlovehome` 之下，访问静态页时被面板路由先命中，面板就在自己的 iframe 里再加载一次自己。现已改为 `/qlh/www`（与面板路径无关），并加了防呆检查——以后谁再把静态目录挂到面板路径下面会直接报错跳过。文档里的手动 iframe 地址同步改为 `/qlh/www/index.html`（复制到 www 目录的场景是 `/local/qlh/index.html`） |

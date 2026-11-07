@@ -42,12 +42,12 @@ def read_version() -> str:
         ]:
             if candidate.exists():
                 data = json.loads(candidate.read_text(encoding="utf-8"))
-                v = str(data.get("version", "1.4.7"))
+                v = str(data.get("version", "1.4.8"))
                 _VERSION_CACHE = v
                 return v
     except (OSError, ValueError):
         pass
-    _VERSION_CACHE = "1.4.7"
+    _VERSION_CACHE = "1.4.8"
     return _VERSION_CACHE
 
 
