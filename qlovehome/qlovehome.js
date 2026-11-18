@@ -7675,12 +7675,18 @@
 
   /* ── 启动后从 HA 服务器对齐配置 + 界面设置 ──
      有服务器数据就以服务器为准（重绘）；服务器还没有数据时，
-     把本机缓存推上去（老用户 / 首次安装自动上云） */
+     把本机缓存推上去（老用户 / 首次安装自动上云）。
+     返回 { ok, empty }：
+       ok=false  → WS / REST 都暂时不可用（登录初期很常见），可以重试；
+       empty=true → 服务器确实还没有配置（新用户），不该重试。 */
   function syncFromServer() {
+    let applied = false;
     return remoteCfgLoad().then((cfg) => {
-      if (cfg === undefined) return null;                 // 接口不可用
+      if (cfg === undefined) return { ok: false };        // 接口不可用 → 交给上层重试
+      const empty = !cfg;
       if (cfg) {
         if (applyCfg(cfg)) {
+          applied = true;
           localCfgWrite(cfg);
           if (window.LH.__sceneSeed) remoteCfgSave(cfg);   // 补了默认情景 → 写回服务器
           if (state.booted) rerenderAll();
@@ -7692,23 +7698,92 @@
           remoteCfgSave(local);                           // 服务器空 → 本机推上去
         }
       }
-      return uiRemoteLoad();
-    }).then((ui) => {
-      if (!ui) return;
-      if (Object.keys(ui).length) {
-        if (uiApplyRemote(ui)) {
-          const t = loadStandbyTimers();
-          RESET_MS = t.reset; IDLE_MS = t.idle;
-          applyTheme(); applySeason(); applySkin(); applyUI();
-          if (state.booted) rerenderAll();
+      return uiRemoteLoad().then((ui) => {
+        if (ui && Object.keys(ui).length) {
+          if (uiApplyRemote(ui)) {
+            const t = loadStandbyTimers();
+            RESET_MS = t.reset; IDLE_MS = t.idle;
+            applyTheme(); applySeason(); applySkin(); applyUI();
+            if (state.booted) rerenderAll();
+          }
+        } else if (ui) {
+          uiRemoteSave(uiCollect());                      // 服务器还没存过界面设置 → 本机推上去
         }
-      } else {
-        uiRemoteSave(uiCollect());                        // 服务器还没存过界面设置 → 本机推上去
-      }
-    }).catch(() => { /* ignore */ }).then(() => {
+        return { ok: true, empty };
+      });
+    }).catch(() => ({ ok: applied })).then((st) => {
       /* 配置对齐之后再补全老设备的 entities（避免用旧缓存覆盖服务器数据） */
       try { migrateDeviceEntities(); } catch (e) { /* ignore */ }
+      return st;
     });
+  }
+
+  /* ── 冷启动加载遮罩 + 首次同步重试 ────────────────────────────
+     本机没有缓存时 boot() 会先画出厂模板，接口没就绪就一直停在示例户型。
+     这里先盖一层遮罩，等服务器配置真正回来再揭开；登录初期 hass / token
+     还没就绪（remoteCfgLoad 返回 undefined）按退避重试，不必手动刷新。 */
+  const SYNC_RETRY_MS = [800, 1500, 3000, 5000, 8000];
+  let bootMask = null;
+  let bootHadCache = false;
+  let syncPromise = null;
+  let lastSync = null;
+
+  function showBootMask(text) {
+    if (!bootMask) {
+      bootMask = document.createElement('div');
+      bootMask.className = 'boot-mask';
+      bootMask.innerHTML = '<div class="bm-box"><div class="bm-spin"></div><div class="bm-text"></div></div>';
+      document.body.appendChild(bootMask);
+    }
+    const t = bootMask.querySelector('.bm-text');
+    if (t) t.textContent = text || '正在载入面板配置…';
+  }
+  function hideBootMask() {
+    if (!bootMask) return;
+    const m = bootMask;
+    bootMask = null;
+    m.classList.add('off');
+    setTimeout(() => { try { m.remove(); } catch (e) { /* ignore */ } }, 280);
+  }
+
+  /* 同一时刻只跑一份同步；retry=true 时对「接口不可用」退避重试（约 18 秒） */
+  function ensureSynced(retry) {
+    if (syncPromise) return syncPromise;
+    const attempt = (i) => syncFromServer().then((st) => {
+      lastSync = st;
+      if (st.ok || !retry || i >= SYNC_RETRY_MS.length) return st;
+      const t = bootMask && bootMask.querySelector('.bm-text');
+      if (t) t.textContent = '正在连接 Home Assistant…';
+      return new Promise((res) => setTimeout(res, SYNC_RETRY_MS[i]))
+        .then(() => attempt(i + 1));
+    });
+    syncPromise = attempt(0).then((st) => { syncPromise = null; return st; },
+      (e) => { syncPromise = null; throw e; });
+    return syncPromise;
+  }
+
+  /* 后台恢复 / 断网重连：只有上次没同步成功才补一次（成功过就不再重复拉） */
+  function resyncIfNeeded() {
+    if (syncPromise || bootMask || document.hidden) return;
+    if (lastSync && lastSync.ok) return;
+    ensureSynced(false).catch(() => { /* ignore */ });
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) resyncIfNeeded(); });
+  window.addEventListener('pageshow', (e) => { if (e.persisted) resyncIfNeeded(); });
+  window.addEventListener('online', resyncIfNeeded);
+
+  /* HAOS 重启窗口：页面可能一直可见、也不会触发 visibilitychange，
+     这里补一条低频兜底（10 秒一次，最多 5 分钟），同步成功自动停 */
+  let slowResync = null;
+  function startSlowResync() {
+    if (slowResync) return;
+    let left = 30;
+    slowResync = setInterval(() => {
+      if ((lastSync && lastSync.ok) || --left < 0) {
+        clearInterval(slowResync); slowResync = null; return;
+      }
+      ensureSynced(false).catch(() => { /* ignore */ });
+    }, 10000);
   }
 
   /* ── 首次打开的三步引导（只看一次）──
@@ -7820,10 +7895,24 @@
     /* 通知编辑器：boot 已完成，可以安全地触发重绘/注入入口 */
     window.QLOVEHOME_BOOTED = true;
     document.dispatchEvent(new CustomEvent('QLOVEHOME_BOOTED'));
-    /* ★ 再从 HA 服务器拉一次（换电脑 / 换浏览器时靠这一步还原全部配置与设置） */
-    syncFromServer();
-    /* 首次打开：等布局稳定后给三步引导（不影响已有用户） */
-    setTimeout(() => { try { maybeOnboarding(); } catch (e) { /* 忽略 */ } }, 1500);
+    /* ★ 再从 HA 服务器拉一次（换电脑 / 换浏览器时靠这一步还原全部配置与设置）。
+       本机没有缓存时是从出厂模板起手的 → 遮罩 + 退避重试，配置回来再揭开。
+       只有「服务器确实没有配置」的新用户才给三步引导，老用户不再被弹窗打扰。 */
+    if (window.parent === window && !haToken()) {
+      hideBootMask();          // 没登录态也没父窗口 → 拉不到配置，直接看示例
+      return;
+    }
+    ensureSynced(!bootHadCache).then((st) => {
+      hideBootMask();
+      if (!st || !st.ok) {
+        toast('暂时连不上 Home Assistant，稍后会自动重试');
+        startSlowResync();
+        return;
+      }
+      if (st.empty && !bootHadCache) {
+        setTimeout(() => { try { maybeOnboarding(); } catch (e) { /* 忽略 */ } }, 400);
+      }
+    }).catch(() => { hideBootMask(); });
   }
 
   /* ── 编辑器触发的整体重绘（不重启定时器、不重新绑事件） ── */
@@ -7864,6 +7953,9 @@
   document.addEventListener('QLOVEHOME_RERENDER', rerenderAll);
 
   document.addEventListener('DOMContentLoaded', () => {
+    /* 本机没有缓存 → 先把出厂模板盖住，等服务器配置回来再揭开（避免闪一下示例户型） */
+    bootHadCache = !!localCfgRead();
+    if (!bootHadCache) showBootMask('正在载入面板配置…');
     // 等父窗口的 hass 就绪（iframe 首次加载时可能还没注入）
     let tries = 0;
     (function wait() {

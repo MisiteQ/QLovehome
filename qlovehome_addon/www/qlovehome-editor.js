@@ -728,6 +728,42 @@
     return null;
   }
 
+  /* 底图压缩：原图直接转 base64 写进配置，一张手机照片就能让整份配置涨到 2MB 以上
+     （localStorage 配额边缘，冷启动还要重新下载一遍）。这里统一缩到长边 1600px、
+     WebP 质量 0.82，通常 150–300KB，做背景足够清晰。
+     任何一步失败都回退原图，不阻塞导入。 */
+  function compressPhoto(dataUrl, maxSide, quality) {
+    return new Promise((resolve) => {
+      if (!/^data:image\//i.test(dataUrl) || /^data:image\/svg/i.test(dataUrl)) {
+        resolve(dataUrl); return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const nw = img.naturalWidth || img.width;
+          const nh = img.naturalHeight || img.height;
+          if (!nw || !nh) { resolve(dataUrl); return; }
+          const scale = Math.min(1, maxSide / Math.max(nw, nh));
+          const w = Math.max(1, Math.round(nw * scale));
+          const h = Math.max(1, Math.round(nh * scale));
+          const cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          const ctx = cv.getContext('2d');
+          if (!ctx) { resolve(dataUrl); return; }
+          ctx.drawImage(img, 0, 0, w, h);
+          let out = '';
+          try { out = cv.toDataURL('image/webp', quality); } catch (e) { out = ''; }
+          /* 不支持 WebP 的浏览器会退回 PNG（可能更大），改用 JPEG */
+          if (!/^data:image\/webp/i.test(out)) out = cv.toDataURL('image/jpeg', quality);
+          resolve(out && out.length < dataUrl.length ? out : dataUrl);
+        } catch (e) { resolve(dataUrl); }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+  const kbOf = (s) => Math.round((s || '').length * 0.75 / 1024);
+
   /* 底图栏：无底图 → 引导导入；有底图 → 位置/大小微调 */
   function buildPhotoBar() {
     const plan = window.LH.plan || {};
@@ -743,6 +779,7 @@
       '<label>宽<input type="number" id="phW" value="' + (p.w || plan.w) + '"></label>' +
       '<label>高<input type="number" id="phH" value="' + (p.h || plan.h) + '"></label>' +
       '<button class="lh-ed-btn" id="phFit" type="button">铺满画布</button>' +
+      '<button class="lh-ed-btn" id="phShrink" type="button">压缩底图</button>' +
       '<button class="lh-ed-btn danger" id="phDel" type="button">移除</button>';
     const apply = () => {
       p.x = parseFloat($('#phX', bar).value) || 0;
@@ -758,6 +795,21 @@
       p.x = 0; p.y = 0; p.w = plan.w; p.h = plan.h;
       markDirty(); rerenderEditorTab();
       document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
+    });
+    /* 老配置里的底图可能还是 2MB 级的原图（localStorage 存不下、每次冷启动重下） */
+    $('#phShrink', bar).addEventListener('click', () => {
+      const src = p.src || '';
+      if (!/^data:image\//i.test(src)) { toastHint('当前底图不是内嵌图片（外链地址），无需压缩'); return; }
+      compressPhoto(src, 1600, 0.82).then((out) => {
+        if (out.length >= src.length * 0.9) {
+          toastHint('这张底图已经很紧凑了（约 ' + kbOf(src) + 'KB），无需压缩');
+          return;
+        }
+        p.src = out;
+        markDirty(); rerenderEditorTab();
+        document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
+        toastHint('底图已压缩：约 ' + kbOf(src) + 'KB → ' + kbOf(out) + 'KB，记得保存');
+      });
     });
     $('#phDel', bar).addEventListener('click', () => {
       if (!confirm('确定移除底图？')) return;
@@ -907,14 +959,17 @@
         if (f.size > 8 * 1024 * 1024) { toastHint('图片超过 8MB，请先压缩再导入'); return; }
         const r = new FileReader();
         r.onload = () => {
-          const plan = window.LH.plan || (window.LH.plan = { w: 620, h: 692 });
-          plan.photo = { src: r.result, x: 0, y: 0, w: plan.w, h: plan.h };
-          // 自动切到「现实」皮肤，让底图在主页面立刻可见
-          try { localStorage.setItem('qlh.skin', 'real'); } catch (e) { /* ignore */ }
-          markDirty();
-          rerenderEditorTab();
-          document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
-          toastHint('底图已导入，主页自动切换到「现实」皮肤。用底图栏的 X/Y/宽/高 微调对位');
+          /* 导入即压缩：原图 base64 会让整份配置涨到几 MB，本机缓存直接存不下 */
+          compressPhoto(r.result, 1600, 0.82).then((src) => {
+            const plan = window.LH.plan || (window.LH.plan = { w: 620, h: 692 });
+            plan.photo = { src, x: 0, y: 0, w: plan.w, h: plan.h };
+            // 自动切到「现实」皮肤，让底图在主页面立刻可见
+            try { localStorage.setItem('qlh.skin', 'real'); } catch (e) { /* ignore */ }
+            markDirty();
+            rerenderEditorTab();
+            document.dispatchEvent(new CustomEvent('QLOVEHOME_RERENDER'));
+            toastHint('底图已导入（长边压到 1600px，约 ' + kbOf(src) + 'KB），主页自动切换到「现实」皮肤。用底图栏的 X/Y/宽/高 微调对位');
+          });
         };
         r.readAsDataURL(f);
       };

@@ -2697,3 +2697,17 @@ svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1
 .ev-l .ev-w { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ev-l b { font-weight: 400; color: var(--text); }
 .ev-empty { font-size: calc(11.5px * var(--fsk)); color: var(--dim-2); padding: 6px 0; }
+
+/* ── 冷启动加载遮罩 ──────────────────────────────────────────
+   本机没有缓存时先盖住出厂模板，等服务器配置回来（或重试结束）再揭开。
+   body 级 fixed，不依赖 .screen 的主题变量，深浅色下都用深底。 */
+.boot-mask { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center;
+  background: #0b0e14; color: rgba(236, 239, 244, .82);
+  font: 14px/1.5 var(--font); letter-spacing: .04em;
+  transition: opacity .26s ease; }
+.boot-mask.off { opacity: 0; pointer-events: none; }
+.boot-mask .bm-box { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.boot-mask .bm-spin { width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid rgba(231, 189, 121, .22); border-top-color: #e7bd79;
+  animation: bm-spin .9s linear infinite; }
+@keyframes bm-spin { to { transform: rotate(360deg); } }
